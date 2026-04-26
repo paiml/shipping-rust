@@ -1,0 +1,17 @@
+target/
+**/target/
+.git/
+.github/
+*.profraw
+*.profdata
+lcov.info
+coverage/
+llvm-cov-target/
+.pmat-work/
+.pmat/cache/
+criterion/
+**/criterion/
+*.log
+.idea/
+.vscode/
+README.md.bak

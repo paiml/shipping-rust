@@ -1,0 +1,80 @@
+[workspace]
+members = [
+    "etl-core",
+    "etl-cli",
+    "etl-bench",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paiml/shipping-rust"
+authors = ["Noah Gift <noah@paiml.com>"]
+rust-version = "1.85"
+homepage = "https://github.com/paiml/shipping-rust"
+# Files explicitly excluded from any future `cargo publish` tarballs.
+# (The crates here are reference companions, not crates.io publications,
+# but keeping the exclude list tight is a good habit and clears the
+# CB-500 advisory in `pmat comply`.)
+exclude = [
+    "Dockerfile",
+    "Dockerfile.distroless-cc",
+    ".dockerignore",
+    ".github/**",
+    "deny.toml",
+    "*.png",
+    "*.jpg",
+    "criterion/",
+    "**/criterion/",
+]
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# CSV parsing
+csv = "1.3"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# CLI parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Internal workspace crate
+etl-core = { path = "etl-core", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+# Allowed pedantic lints for ergonomics:
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# Optimize release builds for binary size (scratch container target)
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.bench]
+opt-level = 3
+lto = "thin"

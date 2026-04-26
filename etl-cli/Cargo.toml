@@ -1,0 +1,26 @@
+[package]
+name = "etl-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
+exclude.workspace = true
+description = "Reference CLI for the etl-core crate (course c9: Shipping Rust)"
+keywords = ["etl", "csv", "json", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "etl"
+path = "src/main.rs"
+
+[dependencies]
+etl-core = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

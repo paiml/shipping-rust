@@ -1,0 +1,29 @@
+# Cargo
+/target
+**/target/
+Cargo.lock.bak
+
+# Coverage artifacts
+*.profraw
+*.profdata
+/lcov.info
+/coverage/
+/llvm-cov-target/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# pmat (everything generated; only project.toml is checked in if curated)
+/.pmat-work/
+/.pmat/
+
+# Bench
+/criterion/
+**/criterion/
+
+# Misc
+*.log

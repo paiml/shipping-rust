@@ -1,0 +1,107 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+  # Binary size budget (bytes). Stripped musl scratch target should fit in <8MB.
+  ETL_MAX_RELEASE_BYTES: "8388608"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Single aggregated gate. If this is green, the workspace is ship-ready.
+  gate:
+    name: gate (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pin to the workspace MSRV (1.85.0 — the channel pinned in
+        # rust-toolchain.toml) and also test against current stable so we
+        # catch regressions on the latest compiler.
+        toolchain: ["1.85.0", "stable"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins 1.85.0 with rustfmt + clippy +
+      # llvm-tools-preview; for the `stable` matrix entry we install
+      # explicitly with the same components.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: gate-${{ matrix.toolchain }}
+
+      # Required by `cargo llvm-cov`. Pinned versions for reproducible CI.
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.6
+
+      - name: Install cargo-deny + cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.16,cargo-audit@0.21
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Doc (warnings = errors)
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps
+
+      - name: Test
+        run: cargo test --workspace --all-targets
+
+      - name: Doc-test
+        run: cargo test --workspace --doc
+
+      - name: Coverage (must be 100% lines)
+        run: cargo llvm-cov --workspace --fail-under-lines 100
+
+      - name: Audit
+        run: cargo audit --deny warnings
+
+      - name: Deny
+        run: cargo deny check
+
+      - name: Release build
+        run: cargo build --release --workspace
+
+      # Hard binary-size budget. The scratch-musl container target should be
+      # well under 8 MB. If a dependency suddenly bloats the binary CI fails
+      # before that ships.
+      - name: Binary size budget
+        run: |
+          set -euo pipefail
+          bin="target/release/etl"
+          test -f "$bin"
+          size_bytes=$(stat -c%s "$bin")
+          echo "etl binary size: ${size_bytes} bytes"
+          if [ "$size_bytes" -gt "${ETL_MAX_RELEASE_BYTES}" ]; then
+            echo "::error::etl binary (${size_bytes} bytes) exceeds budget (${ETL_MAX_RELEASE_BYTES} bytes)"
+            exit 1
+          fi
+
+      - name: Bench (smoke)
+        run: cargo bench --workspace -- --test

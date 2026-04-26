@@ -1,0 +1,29 @@
+[package]
+name = "etl-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
+description = "Criterion throughput benchmarks for the etl-core crate"
+publish = false
+
+# A trivial library so the bench harness can pull this crate by name.
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+etl-core = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+etl-core = { workspace = true }
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[lints]
+workspace = true
