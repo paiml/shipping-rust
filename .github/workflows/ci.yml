@@ -64,23 +64,38 @@ jobs:
           tool: cargo-deny@0.19,cargo-audit@0.22
 
       # bashrs lints Makefile + Dockerfiles. provable-contracts-cli
-      # (`pv`) lints the YAML contracts in contracts/. Both are pure-cargo
-      # installs because neither ships prebuilt binaries on crates.io
-      # today; the rust-cache step above keeps them warm across runs.
+      # (`pv`, shipped from paiml/aprender as `aprender-contracts-cli`)
+      # lints the YAML contracts in contracts/. We download prebuilt
+      # binaries from each tool's GitHub release rather than `cargo
+      # install` so CI doesn't recompile ~5 min of source on every run.
+      # Both ship x86_64-unknown-linux-gnu tarballs against ubuntu-latest.
+      # Bump the *_VERSION envs below when we want a newer build.
       #
-      # Only on stable: bashrs's transitive deps (e.g. home@0.5.12)
-      # require rustc 1.88+, newer than our 1.85 MSRV. Running the lint
-      # once on stable is sufficient — the MSRV matrix entry exists to
-      # prove the workspace itself builds on 1.85.
-      #
-      # We also need `cargo +stable` explicitly: rust-toolchain.toml in
-      # the workspace pins channel 1.85.0, which overrides the matrix
-      # toolchain for any cargo invocation in this directory tree.
-      - name: Install bashrs + pv
+      # Only on stable: keeping this gate on stable avoids running the
+      # lint twice across the toolchain matrix; the MSRV matrix entry
+      # still proves the workspace itself builds on 1.85.
+      - name: Install prebuilt CLIs (bashrs + pv)
         if: matrix.toolchain == 'stable'
+        env:
+          BASHRS_VERSION: v6.66.0
+          PV_VERSION: v0.31.2
         run: |
-          cargo +stable install bashrs --locked
-          cargo +stable install provable-contracts-cli --locked
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/prebuilt-bin"
+          mkdir -p "$install_dir"
+          for tool_spec in \
+            "bashrs:paiml/bashrs:${BASHRS_VERSION}:bashrs-${BASHRS_VERSION}-x86_64-unknown-linux-gnu" \
+            "pv:paiml/aprender:${PV_VERSION}:pv-${PV_VERSION}-x86_64-unknown-linux-gnu"
+          do
+            IFS=: read -r bin repo ver archive <<< "$tool_spec"
+            url="https://github.com/${repo}/releases/download/${ver}/${archive}.tar.gz"
+            echo "Downloading $bin from $url"
+            curl -sSfL "$url" | tar xz -C "$install_dir"
+            mv "$install_dir/$archive/$bin" "$install_dir/$bin"
+            chmod +x "$install_dir/$bin"
+            "$install_dir/$bin" --version
+          done
+          echo "$install_dir" >> "$GITHUB_PATH"
 
       - name: Lint Makefile + Dockerfiles (bashrs)
         if: matrix.toolchain == 'stable'
