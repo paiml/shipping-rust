@@ -63,15 +63,23 @@ jobs:
       # (`pv`) lints the YAML contracts in contracts/. Both are pure-cargo
       # installs because neither ships prebuilt binaries on crates.io
       # today; the rust-cache step above keeps them warm across runs.
+      #
+      # Only on stable: bashrs's transitive deps (e.g. home@0.5.12)
+      # require rustc 1.88+, which is newer than our 1.85 MSRV. Running
+      # the lint once on stable is sufficient — the MSRV matrix entry
+      # exists to prove the workspace itself builds on 1.85.
       - name: Install bashrs + pv
+        if: matrix.toolchain == 'stable'
         run: |
           cargo install bashrs --locked
           cargo install provable-contracts-cli --locked
 
       - name: Lint Makefile + Dockerfiles (bashrs)
+        if: matrix.toolchain == 'stable'
         run: bashrs lint Makefile Dockerfile Dockerfile.distroless-cc
 
       - name: Lint contracts (pv)
+        if: matrix.toolchain == 'stable'
         run: pv lint contracts/
 
       - name: Format
