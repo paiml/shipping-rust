@@ -54,13 +54,14 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.6
 
-      # cargo-audit 0.22+ required to parse advisories that use CVSS 4.0.
-      # Earlier versions error with `unsupported CVSS version: 4.0` when
-      # the advisory-db ships a 4.0 entry (e.g. RUSTSEC-2026-0073).
+      # cargo-audit 0.22+ and cargo-deny 0.19+ are required to parse
+      # advisories that use CVSS 4.0. Earlier versions error with
+      # `unsupported CVSS version: 4.0` when the advisory-db ships a
+      # 4.0 entry (e.g. RUSTSEC-2026-0073).
       - name: Install cargo-deny + cargo-audit
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@0.16,cargo-audit@0.22
+          tool: cargo-deny@0.19,cargo-audit@0.22
 
       # bashrs lints Makefile + Dockerfiles. provable-contracts-cli
       # (`pv`) lints the YAML contracts in contracts/. Both are pure-cargo
