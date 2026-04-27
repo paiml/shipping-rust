@@ -21,6 +21,10 @@ Cargo.lock.bak
 /.pmat-work/
 /.pmat/
 
+# provable-contracts CLI state cache (root + contracts/ subtree)
+/.pv/
+/contracts/.pv/
+
 # Bench
 /criterion/
 **/criterion/

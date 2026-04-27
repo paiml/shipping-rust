@@ -22,11 +22,11 @@
 # no shell, no libc, no package manager — only the binary and what cargo
 # linked into it.
 
-ARG RUST_VERSION=1.85
 ARG TARGET=x86_64-unknown-linux-musl
 
 # Stage 1 — build the static musl binary.
-FROM rust:${RUST_VERSION}-slim AS builder
+# Base image pinned by digest (rust:1.85-slim) to satisfy DOCKER002.
+FROM rust:1.85-slim@sha256:9f841bbe9e7d8e37ceb96ed907265a3a0df7f44e3737d0b100e7907a679acb36 AS builder
 ARG TARGET
 ENV CARGO_NET_RETRY=10 \
     CARGO_TERM_COLOR=always

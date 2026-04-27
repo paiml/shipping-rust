@@ -59,6 +59,21 @@ jobs:
         with:
           tool: cargo-deny@0.16,cargo-audit@0.21
 
+      # bashrs lints Makefile + Dockerfiles. provable-contracts-cli
+      # (`pv`) lints the YAML contracts in contracts/. Both are pure-cargo
+      # installs because neither ships prebuilt binaries on crates.io
+      # today; the rust-cache step above keeps them warm across runs.
+      - name: Install bashrs + pv
+        run: |
+          cargo install bashrs --locked
+          cargo install provable-contracts-cli --locked
+
+      - name: Lint Makefile + Dockerfiles (bashrs)
+        run: bashrs lint Makefile Dockerfile Dockerfile.distroless-cc
+
+      - name: Lint contracts (pv)
+        run: pv lint contracts/
+
       - name: Format
         run: cargo fmt --all -- --check
 
@@ -103,5 +118,9 @@ jobs:
             exit 1
           fi
 
+      # Smoke-test the criterion benches. `--test` runs each bench's
+      # measurement loop once without recording samples — proves the
+      # bench harness compiles and runs end-to-end without burning CI
+      # time on full statistical measurements.
       - name: Bench (smoke)
         run: cargo bench --workspace -- --test

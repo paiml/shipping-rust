@@ -1,0 +1,88 @@
+metadata:
+  version: 1.0.0
+  created: '2026-04-27'
+  author: 'PAIML Engineering'
+  description: |
+    Provable contracts for the c9 Shipping Rust ETL reference pipeline.
+    Two row-aligned invariants: row-count alignment between input/output
+    plus rejected, and JSON serialization round-trip identity for the
+    Report type. Both are asserted at runtime in `etl-cli/src/main.rs`
+    on every successful CLI invocation; the YAML below is the formal
+    spec linted by `pv lint contracts/` (see Makefile target
+    `make contracts-check`).
+  references:
+    - 'shipping-rust README §Provable contracts'
+    - 'paiml/provable-contracts (pv) — papers to provable Rust kernels'
+
+equations:
+  rows_in_equals_rows_out:
+    formula: 'report.rows_in == report.rows_out + report.rows_rejected'
+    domain: 'report ∈ Report = { rows_in: u64, rows_out: u64, rows_rejected: u64, errors_by_kind: BTreeMap<ErrorKind, u64> }'
+    codomain: 'bool'
+    lean_theorem: Theorems.Etl.RowsInEqualsRowsOut
+    postconditions:
+    - result.rows_in == result.rows_out + result.rows_rejected
+
+  report_json_roundtrips:
+    formula: 'from_str(to_string(report)) == report'
+    domain: 'report ∈ Report'
+    codomain: 'Report'
+    lean_theorem: Theorems.Etl.ReportJsonRoundtrips
+    postconditions:
+    - serde_json::from_str::<crate::Report>(&serde_json::to_string(result).expect("serialize")).expect("parse") == *result
+
+proof_obligations:
+  - type: invariant
+    property: 'Row alignment'
+    formal: 'rows_in = rows_out + rows_rejected'
+    applies_to: all
+  - type: postcondition
+    property: 'JSON roundtrip identity'
+    formal: '∀ r: Report. from_str(to_string(r)) = Ok(r)'
+    applies_to: all
+
+enforcement:
+  row_alignment:
+    description: 'Rows in must equal rows out plus rows rejected.'
+    check: 'etl-cli runtime assert! after every successful run'
+    severity: 'ERROR'
+  json_roundtrip:
+    description: 'Report must serialize and parse back to an equal value.'
+    check: 'etl-cli runtime assert! after every successful run'
+    severity: 'ERROR'
+
+falsification_tests:
+  - id: FALSIFY-ETL-001
+    rule: 'Row alignment'
+    prediction: 'For any CSV input, rows_in equals rows_out plus rows_rejected.'
+    test: 'etl-core::tests + etl-cli integration tests cover happy/reject mixes'
+    if_fails: 'Silent row drop in run() — pipeline reads more than it accounts for.'
+
+  - id: FALSIFY-ETL-002
+    rule: 'JSON roundtrip identity'
+    prediction: 'serde_json::from_str(serde_json::to_string(r)) equals r for any Report r.'
+    test: 'etl-cli::tests::report_json_roundtrip_contract_holds'
+    if_fails: 'Asymmetric Serialize/Deserialize — likely a missing #[serde] attribute.'
+
+qa_gate:
+  id: F-ETL-001
+  name: 'ETL Pipeline Contract'
+  description: 'Row alignment plus JSON roundtrip — both asserted on every successful etl run.'
+  checks:
+    - 'row_alignment'
+    - 'json_roundtrip'
+  pass_criteria: 'Both falsification tests pass and runtime asserts never fire in production.'
+
+kani_harnesses:
+  - id: KANI-ETL-001
+    obligation: 'Row alignment'
+    property: 'rows_in equals rows_out plus rows_rejected for any Report value'
+    bound: 8
+    strategy: exhaustive
+    harness: verify_rows_in_equals_rows_out
+  - id: KANI-ETL-002
+    obligation: 'JSON roundtrip identity'
+    property: 'serde_json round-trip is identity for any Report value'
+    bound: 8
+    strategy: exhaustive
+    harness: verify_report_json_roundtrips

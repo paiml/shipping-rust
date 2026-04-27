@@ -9,10 +9,9 @@
 # stock Docker layer caching and no external build-cache helpers.
 # Builder stage targets the host triple so we get a glibc-linked binary.
 
-ARG RUST_VERSION=1.85
-
 # Stage 1 — build a glibc-linked release binary.
-FROM rust:${RUST_VERSION}-slim AS builder
+# Base image pinned by digest (rust:1.85-slim) to satisfy DOCKER002.
+FROM rust:1.85-slim@sha256:9f841bbe9e7d8e37ceb96ed907265a3a0df7f44e3737d0b100e7907a679acb36 AS builder
 ENV CARGO_NET_RETRY=10 \
     CARGO_TERM_COLOR=always
 RUN apt-get update \
@@ -26,10 +25,11 @@ COPY etl-bench etl-bench
 RUN cargo build --release --bin etl --locked
 RUN strip target/release/etl
 
-# Stage 2 — distroless cc base, runs as nonroot.
-FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+# Stage 2 — distroless cc base, runs as nonroot. Pinned by digest.
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:e2d29aec8061843706b7e484c444f78fafb05bfe47745505252b1769a05d14f1 AS runtime
 LABEL org.opencontainers.image.source="https://github.com/paiml/shipping-rust" \
       org.opencontainers.image.description="Reference etl CLI for course c9 (Shipping Rust) — distroless cc variant" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0"
 COPY --from=builder /build/target/release/etl /usr/local/bin/etl
+USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/etl"]
