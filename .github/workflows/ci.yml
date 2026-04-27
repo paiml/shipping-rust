@@ -19,9 +19,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Single aggregated gate. If this is green, the workspace is ship-ready.
-  gate:
-    name: gate (${{ matrix.toolchain }})
+  # Matrix entries do the actual work. The `gate` aggregator below is
+  # what the branch ruleset on main keys off of — it requires a status
+  # check named literally `gate`, which matrix expansion doesn't emit
+  # (you only get `gate-matrix (toolchain)` from a strategy.matrix job).
+  gate-matrix:
+    name: gate-matrix (${{ matrix.toolchain }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -155,3 +158,20 @@ jobs:
       # time on full statistical measurements.
       - name: Bench (smoke)
         run: cargo bench --workspace -- --test
+
+  # Aggregator. The branch ruleset on `main` requires a status check
+  # named exactly `gate`; the matrix above only emits `gate-matrix
+  # (toolchain)`. This job collapses the matrix into a single check so
+  # PRs can merge without --admin overrides.
+  gate:
+    name: gate
+    needs: gate-matrix
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify matrix succeeded
+        run: |
+          if [ "${{ needs.gate-matrix.result }}" != "success" ]; then
+            echo "::error::gate-matrix did not all pass (result=${{ needs.gate-matrix.result }})"
+            exit 1
+          fi
