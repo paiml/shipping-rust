@@ -20,12 +20,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - All test fixtures, bench inputs, README examples, and error messages
     refer to fruit / weight consistently — one domain runs through the
     whole workspace.
-- **Container layering — dropped `cargo-chef`.** Both `Dockerfile` and
-  `Dockerfile.distroless-cc` now use a plain multi-stage pattern that
+- **Container layering — plain multi-stage build.** Both `Dockerfile`
+  and `Dockerfile.distroless-cc` use a plain multi-stage pattern that
   matches [`paiml/forjar`](https://github.com/paiml/forjar)'s own
-  Dockerfile. Workspace manifests are copied before sources so
-  `cargo fetch --locked` caches independently of source edits — stock
-  Docker layer caching is sufficient at this workspace size.
+  Dockerfile, with no external Rust build-cache helpers. Workspace
+  manifests are copied before sources so `cargo fetch --locked` caches
+  independently of source edits — stock Docker layer caching is
+  sufficient at this workspace size.
 
 ### Added
 
@@ -58,8 +59,8 @@ Cargo, CI, Benchmarks & Containers**.
 - CI workflow (`.github/workflows/ci.yml`) — single `gate` job runs
   fmt / clippy / doc / test / coverage / audit / deny / release-build /
   binary-size budget / bench-smoke against MSRV and stable.
-- Multi-stage `Dockerfile` (cargo-chef + musl + scratch) — final image
-  contains only the `etl` binary and runs as user `65532`.
+- Multi-stage `Dockerfile` (plain multi-stage, musl + scratch) — final
+  image contains only the `etl` binary and runs as user `65532`.
 - Alternative `Dockerfile.distroless-cc` for glibc-linked workloads.
 - Supply-chain hygiene — `cargo audit`, `cargo deny` (registry & git
   source allow-list, license allow-list, version-conflict warnings).

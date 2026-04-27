@@ -5,9 +5,9 @@
 # certificates — useful when the workload links to glibc transitively or
 # needs to validate TLS roots.
 #
-# Like the scratch Dockerfile, this build deliberately avoids cargo-chef
-# and uses stock Docker layer caching. Builder stage targets the host
-# triple so we get a glibc-linked binary.
+# Like the scratch Dockerfile, this build is a plain multi-stage with
+# stock Docker layer caching and no external build-cache helpers.
+# Builder stage targets the host triple so we get a glibc-linked binary.
 
 ARG RUST_VERSION=1.85
 

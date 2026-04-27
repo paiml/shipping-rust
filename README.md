@@ -17,7 +17,7 @@ Rust binary looks like end-to-end:
 - single-job CI that aggregates fmt / clippy / test / coverage / audit /
   deny / release-build / binary-size budget / bench-smoke
 - a multi-stage Docker build that produces a **<2 MB** scratch container
-  (no `cargo-chef` dependency — stock Docker layer caching only)
+  (stock Docker layer caching only — no external build-cache helpers)
 - supply-chain hygiene via `cargo-audit` and `cargo-deny`
 - dual MIT / Apache-2.0 licensing
 
@@ -100,13 +100,14 @@ $ printf 'id,fruit,weight_g\n1,apple,150\nbad_id,banana,118\n3,,77\n4,grape,5\n'
 ## Container
 
 The included [`Dockerfile`](Dockerfile) is a plain musl + scratch
-multi-stage build — **no `cargo-chef`**. The pattern follows
+multi-stage build — no external Rust build-cache helpers, just stock
+Docker layer caching. The pattern follows
 [`paiml/forjar`](https://github.com/paiml/forjar)'s own Dockerfile: for a
-small workspace the layer savings from chef are not worth the extra
-dependency. We rely on stock Docker layer caching by copying workspace
-manifests first so `cargo fetch --locked` is reused whenever sources
-change but `Cargo.lock` does not. The final image runs as user `65532`
-and contains nothing but the static `etl` binary.
+small workspace the extra dependency is not worth the layer savings. We
+rely on Docker's stock layer cache by copying workspace manifests first
+so `cargo fetch --locked` is reused whenever sources change but
+`Cargo.lock` does not. The final image runs as user `65532` and contains
+nothing but the static `etl` binary.
 
 ```bash
 $ docker build -t shipping-rust:latest .
@@ -120,8 +121,8 @@ $ printf 'id,fruit,weight_g\n1,apple,150\n' | docker run --rm -i shipping-rust:l
 
 A glibc-linked variant is available at [`Dockerfile.distroless-cc`](Dockerfile.distroless-cc)
 for workloads that need a libc / TLS roots / `/etc/passwd` (Google's
-distroless `cc-debian12:nonroot` base, ~25 MB). Same chef-free layering
-strategy, different runtime base.
+distroless `cc-debian12:nonroot` base, ~25 MB). Same plain-multi-stage
+layering strategy, different runtime base.
 
 ## CI
 
@@ -165,8 +166,8 @@ If `gate` is green, the workspace is ship-ready. See
   size-budget / bench is far easier to read at a glance than a fan-out
   graph.
 - **Containers should be smaller than your CSV input.** The scratch +
-  musl pattern lands a static Rust binary at <2 MB without the
-  `cargo-chef` dependency — Docker's stock layer cache is enough when
+  musl pattern lands a static Rust binary at <2 MB without any external
+  Rust build-cache helper — Docker's stock layer cache is enough when
   the workspace is this size.
 
 ## License

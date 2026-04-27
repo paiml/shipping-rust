@@ -2,14 +2,14 @@
 #
 # Reference container for the `etl` CLI from course c9 "Shipping Rust".
 #
-# We deliberately avoid cargo-chef here. The forjar project (paiml's IaC
-# tool, https://github.com/paiml/forjar) ships a plain multi-stage
-# Dockerfile and demonstrates that for a small workspace the layer
-# savings from chef are not worth the extra dependency. We rely on
-# Docker's stock layer cache: workspace manifests copy first so when
-# only sources change Docker can reuse the manifest layers, and the
-# `cargo build` step's own layer is reused as long as none of the COPY
-# inputs above it have changed.
+# Plain multi-stage build with no external Rust build-cache helpers —
+# stock Docker layer caching only. The pattern follows the forjar project
+# (paiml's IaC tool, https://github.com/paiml/forjar), whose own Dockerfile
+# demonstrates that for a small workspace the extra dependency is not
+# worth the layer savings. We rely on Docker's stock layer cache:
+# workspace manifests copy first so when only sources change Docker
+# reuses the manifest layers, and the `cargo build` step's own layer is
+# reused as long as none of the COPY inputs above it have changed.
 #
 # Two stages:
 #   1. `builder` — rust:slim + musl toolchain. Compiling against
@@ -37,7 +37,7 @@ RUN rustup target add ${TARGET} \
 WORKDIR /build
 # Copy workspace manifests + sources together. Docker's layer cache reuses
 # these COPY layers (and the cargo build layer below them) as long as the
-# inputs are unchanged — no cargo-chef helper required.
+# inputs are unchanged — no extra helper required.
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY etl-core etl-core
 COPY etl-cli etl-cli
