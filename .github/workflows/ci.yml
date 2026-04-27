@@ -3,6 +3,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -13,6 +14,8 @@ env:
   RUSTFLAGS: "-D warnings"
   # Binary size budget (bytes). Stripped musl scratch target should fit in <8MB.
   ETL_MAX_RELEASE_BYTES: "8388608"
+  # Container image published to GitHub Container Registry.
+  IMAGE_NAME: ghcr.io/paiml/shipping-rust
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -59,6 +62,15 @@ jobs:
         with:
           tool: cargo-deny@0.16,cargo-audit@0.21
 
+      # pmat is paiml's quality-and-compliance tool. Installed only on the
+      # `stable` matrix entry — pmat may pull dependencies that exceed our
+      # MSRV, and `pmat comply` is a project-level check, not a
+      # toolchain-specific one. Swatinem/rust-cache caches ~/.cargo/bin so
+      # subsequent runs reuse the binary.
+      - name: Install pmat
+        if: matrix.toolchain == 'stable'
+        run: cargo install pmat --locked
+
       - name: Format
         run: cargo fmt --all -- --check
 
@@ -78,6 +90,10 @@ jobs:
 
       - name: Coverage (must be 100% lines)
         run: cargo llvm-cov --workspace --fail-under-lines 100
+
+      - name: pmat comply
+        if: matrix.toolchain == 'stable'
+        run: pmat comply
 
       - name: Audit
         run: cargo audit --deny warnings
@@ -105,3 +121,102 @@ jobs:
 
       - name: Bench (smoke)
         run: cargo bench --workspace -- --test
+
+  # Static musl build of the etl CLI. Uploaded as a workflow artifact on
+  # every push to main; on tag pushes (vX.Y.Z) the same binary is also
+  # attached to the GitHub Release.
+  build-binary:
+    name: build static binary
+    needs: gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85.0"
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: musl-1.85.0
+
+      - name: Build static binary
+        run: cargo build --release --target x86_64-unknown-linux-musl --bin etl --locked
+
+      - name: Strip binary
+        run: strip target/x86_64-unknown-linux-musl/release/etl
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: etl-x86_64-unknown-linux-musl
+          path: target/x86_64-unknown-linux-musl/release/etl
+          if-no-files-found: error
+
+      # On tag pushes, attach the binary to the GitHub Release.
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/x86_64-unknown-linux-musl/release/etl
+          fail_on_unmatched_files: true
+
+  # Build and push the multi-stage musl/scratch container to GitHub
+  # Container Registry. Tags follow docker/metadata-action defaults:
+  # `latest` on main pushes, `vX.Y.Z` and `vX.Y` on semver tag pushes,
+  # plus a short-sha tag for traceability.
+  build-image:
+    name: build & push container
+    needs: gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
