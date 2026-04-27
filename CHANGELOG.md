@@ -6,6 +6,33 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking — example domain refactor.** The reference dataset is now fruit
+  measurements instead of generic person records. CSV input columns are
+  `id,fruit,weight_g` (previously `id,name,age`); output records carry a
+  `size_bucket` of `Small` (<100 g), `Medium` (100–299 g), `Large` (≥300 g),
+  or `Unknown` (missing weight) instead of an `age_bucket`.
+  - Renamed `AgeBucket` → `SizeBucket`, `Record::name` → `Record::fruit`,
+    `Record::age_bucket` → `Record::size_bucket`.
+  - Renamed `ErrorKind::EmptyName` → `EmptyFruit`,
+    `ErrorKind::InvalidAge` → `InvalidWeight`.
+  - All test fixtures, bench inputs, README examples, and error messages
+    refer to fruit / weight consistently — one domain runs through the
+    whole workspace.
+- **Container layering — dropped `cargo-chef`.** Both `Dockerfile` and
+  `Dockerfile.distroless-cc` now use a plain multi-stage pattern that
+  matches [`paiml/forjar`](https://github.com/paiml/forjar)'s own
+  Dockerfile. Workspace manifests are copied before sources so
+  `cargo fetch --locked` caches independently of source edits — stock
+  Docker layer caching is sufficient at this workspace size.
+
+### Added
+
+- `assets/hero.png` (1280×640) — repo hero image used by the GitHub
+  social card and the README header. Drawn from SVG primitives in
+  `assets/hero.svg`; converted with `cairosvg`.
+
 ## [0.1.0] - 2026-04-26
 
 Initial reference release. Companion workspace for course **c9 — Shipping Rust:

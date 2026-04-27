@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/hero.png" alt="Shipping Rust — Cargo, CI, Benchmarks, Containers" width="900" />
+</p>
+
 # shipping-rust
 
 Reference Rust workspace for course **c9 — Shipping Rust: Cargo, CI,
@@ -12,7 +16,8 @@ Rust binary looks like end-to-end:
 - 100% line coverage gated by `cargo llvm-cov`
 - single-job CI that aggregates fmt / clippy / test / coverage / audit /
   deny / release-build / binary-size budget / bench-smoke
-- a multi-stage Docker build that produces a **<1 MB** scratch container
+- a multi-stage Docker build that produces a **<2 MB** scratch container
+  (no `cargo-chef` dependency — stock Docker layer caching only)
 - supply-chain hygiene via `cargo-audit` and `cargo-deny`
 - dual MIT / Apache-2.0 licensing
 
@@ -27,6 +32,10 @@ scope, same shape, in Rust.
 | [`etl-core`](etl-core/) | library | Typed CSV → JSON Lines pipeline. Rejects malformed rows into a row-aligned `Report`; never panics on bad input. |
 | [`etl-cli`](etl-cli/) | binary (`etl`) | Reads CSV from `--input` (path or `-`), writes JSON Lines to `--output` (path or `-`), emits the report on stderr. |
 | [`etl-bench`](etl-bench/) | library + bench | Synthetic CSV fixture generator (`synth_csv(n)`) used by criterion benches at 1k / 10k / 100k row sizes. |
+
+The example dataset is fruit measurements: each input row is `id,fruit,weight_g`,
+and each output record carries a `size_bucket` of `Small` (<100 g), `Medium`
+(100–299 g), `Large` (≥300 g), or `Unknown` (weight missing).
 
 ## Provable contracts
 
@@ -50,7 +59,7 @@ Requires Rust **1.85.0** (pinned by [`rust-toolchain.toml`](rust-toolchain.toml)
 # Build everything
 cargo build --workspace
 
-# Test (37 tests across unit + integration)
+# Test (unit + integration)
 cargo test --workspace
 
 # 100% line coverage gate
@@ -76,37 +85,43 @@ cargo bench --workspace
 
 ```bash
 # CSV in, JSON Lines out, report on stderr
-$ printf 'id,name,age\n1,Ada,42\n2,Grace,80\n' | cargo run -q --bin etl
-{"id":1,"name":"Ada","age_bucket":"adult"}
-{"id":2,"name":"Grace","age_bucket":"senior"}
+$ printf 'id,fruit,weight_g\n1,apple,150\n2,watermelon,7800\n' | cargo run -q --bin etl
+{"id":1,"fruit":"apple","size_bucket":"Medium"}
+{"id":2,"fruit":"watermelon","size_bucket":"Large"}
 {"rows_in":2,"rows_out":2,"rows_rejected":0,"errors_by_kind":{}}
 
 # Reject paths produce structured rejections, not panics
-$ printf 'id,name,age\n1,Ada,42\nNaN,Bad,1\n3,,77\n4,Senior,90\n' | cargo run -q --bin etl
-{"id":1,"name":"Ada","age_bucket":"adult"}
-{"id":4,"name":"Senior","age_bucket":"senior"}
-{"rows_in":4,"rows_out":2,"rows_rejected":2,"errors_by_kind":{"empty_name":1,"invalid_id":1}}
+$ printf 'id,fruit,weight_g\n1,apple,150\nbad_id,banana,118\n3,,77\n4,grape,5\n' | cargo run -q --bin etl
+{"id":1,"fruit":"apple","size_bucket":"Medium"}
+{"id":4,"fruit":"grape","size_bucket":"Small"}
+{"rows_in":4,"rows_out":2,"rows_rejected":2,"errors_by_kind":{"empty_fruit":1,"invalid_id":1}}
 ```
 
 ## Container
 
-The included [`Dockerfile`](Dockerfile) does a cargo-chef + musl multi-stage
-build and emits a **scratch** image whose only contents are the static
-`etl` binary running as user `65532`.
+The included [`Dockerfile`](Dockerfile) is a plain musl + scratch
+multi-stage build — **no `cargo-chef`**. The pattern follows
+[`paiml/forjar`](https://github.com/paiml/forjar)'s own Dockerfile: for a
+small workspace the layer savings from chef are not worth the extra
+dependency. We rely on stock Docker layer caching by copying workspace
+manifests first so `cargo fetch --locked` is reused whenever sources
+change but `Cargo.lock` does not. The final image runs as user `65532`
+and contains nothing but the static `etl` binary.
 
 ```bash
 $ docker build -t shipping-rust:latest .
 $ docker images shipping-rust:latest --format "{{.Size}}"
-916kB
+1.5MB
 
-$ printf 'id,name,age\n1,Ada,42\n' | docker run --rm -i shipping-rust:latest
-{"id":1,"name":"Ada","age_bucket":"adult"}
+$ printf 'id,fruit,weight_g\n1,apple,150\n' | docker run --rm -i shipping-rust:latest
+{"id":1,"fruit":"apple","size_bucket":"Medium"}
 {"rows_in":1,"rows_out":1,"rows_rejected":0,"errors_by_kind":{}}
 ```
 
 A glibc-linked variant is available at [`Dockerfile.distroless-cc`](Dockerfile.distroless-cc)
 for workloads that need a libc / TLS roots / `/etc/passwd` (Google's
-distroless `cc-debian12:nonroot` base, ~25 MB).
+distroless `cc-debian12:nonroot` base, ~25 MB). Same chef-free layering
+strategy, different runtime base.
 
 ## CI
 
@@ -141,8 +156,8 @@ If `gate` is green, the workspace is ship-ready. See
 - **Reports are row-aligned**. If `rows_in != rows_out + rows_rejected`,
   something fell through silently — and the binary refuses to exit
   cleanly when that happens (the contract asserts at runtime).
-- **100% line coverage is achievable** when you write to it. The 18
-  uncovered regions in `cargo llvm-cov`'s output are all macro-expansion
+- **100% line coverage is achievable** when you write to it. The
+  uncovered regions in `cargo llvm-cov`'s output are macro-expansion
   artifacts (clap derive, thiserror, serde derive); every executable
   line in our own source has a test.
 - **CI should be one job**, not nine. A single `gate` matrix entry that
@@ -150,8 +165,9 @@ If `gate` is green, the workspace is ship-ready. See
   size-budget / bench is far easier to read at a glance than a fan-out
   graph.
 - **Containers should be smaller than your CSV input.** The scratch +
-  musl + cargo-chef recipe is the standard pattern; once you have it,
-  every Rust binary you ship can land at <5 MB.
+  musl pattern lands a static Rust binary at <2 MB without the
+  `cargo-chef` dependency — Docker's stock layer cache is enough when
+  the workspace is this size.
 
 ## License
 

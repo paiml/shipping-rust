@@ -1,36 +1,35 @@
 # syntax=docker/dockerfile:1.7
 #
 # Alternative runtime image: Google's distroless `cc-debian12`. Slightly
-# larger than `FROM scratch` (~20 MB) but ships a libc, /etc/passwd, and CA
+# larger than `FROM scratch` (~25 MB) but ships a libc, /etc/passwd, and CA
 # certificates — useful when the workload links to glibc transitively or
-# needs to validate TLS roots. Builder stage is identical to the scratch
-# Dockerfile but targets the host triple so we get a glibc-linked binary.
+# needs to validate TLS roots.
+#
+# Like the scratch Dockerfile, this build deliberately avoids cargo-chef
+# and uses stock Docker layer caching. Builder stage targets the host
+# triple so we get a glibc-linked binary.
 
 ARG RUST_VERSION=1.85
 
-FROM rust:${RUST_VERSION}-slim AS chef
+# Stage 1 — build a glibc-linked release binary.
+FROM rust:${RUST_VERSION}-slim AS builder
 ENV CARGO_NET_RETRY=10 \
     CARGO_TERM_COLOR=always
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-RUN cargo install --locked cargo-chef@0.1.68
-WORKDIR /work
+WORKDIR /build
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY etl-core etl-core
+COPY etl-cli etl-cli
+COPY etl-bench etl-bench
+RUN cargo build --release --bin etl --locked
+RUN strip target/release/etl
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-COPY --from=planner /work/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
-COPY . .
-RUN cargo build --release --bin etl
-RUN strip /work/target/release/etl
-
+# Stage 2 — distroless cc base, runs as nonroot.
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 LABEL org.opencontainers.image.source="https://github.com/paiml/shipping-rust" \
       org.opencontainers.image.description="Reference etl CLI for course c9 (Shipping Rust) — distroless cc variant" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0"
-COPY --from=builder /work/target/release/etl /usr/local/bin/etl
+COPY --from=builder /build/target/release/etl /usr/local/bin/etl
 ENTRYPOINT ["/usr/local/bin/etl"]

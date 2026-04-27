@@ -2,65 +2,55 @@
 #
 # Reference container for the `etl` CLI from course c9 "Shipping Rust".
 #
-# Three stages:
-#   1. `chef`    — cargo-chef + musl toolchain image used for both planning
-#                   and building. Compiling against musl + targeting
-#                   `x86_64-unknown-linux-musl` lets us copy a single static
-#                   binary into a `scratch` final image.
-#   2. `planner` — emit a `recipe.json` describing the workspace's
-#                   dependency tree so dep compilation can be cached
-#                   independently of source edits.
-#   3. `builder` — `cargo chef cook` the recipe (cached deps), then build
-#                   the actual workspace.
-#   4. `runtime` — `FROM scratch`, copy in only the `etl` binary, set
-#                   ENTRYPOINT.
+# We deliberately avoid cargo-chef here. The forjar project (paiml's IaC
+# tool, https://github.com/paiml/forjar) ships a plain multi-stage
+# Dockerfile and demonstrates that for a small workspace the layer
+# savings from chef are not worth the extra dependency. We rely on
+# Docker's stock layer cache: workspace manifests copy first so when
+# only sources change Docker can reuse the manifest layers, and the
+# `cargo build` step's own layer is reused as long as none of the COPY
+# inputs above it have changed.
 #
-# The result is a fully static, zero-distro container at <6 MB. There is
+# Two stages:
+#   1. `builder` — rust:slim + musl toolchain. Compiling against
+#                  `x86_64-unknown-linux-musl` produces a single static
+#                  binary suitable for a `scratch` final image.
+#   2. `runtime` — `FROM scratch`, copies in only the `etl` binary, runs
+#                  as user 65532.
+#
+# The result is a fully static, zero-distro container under 2 MB. There is
 # no shell, no libc, no package manager — only the binary and what cargo
 # linked into it.
 
 ARG RUST_VERSION=1.85
 ARG TARGET=x86_64-unknown-linux-musl
 
-FROM rust:${RUST_VERSION}-slim AS chef
+# Stage 1 — build the static musl binary.
+FROM rust:${RUST_VERSION}-slim AS builder
 ARG TARGET
 ENV CARGO_NET_RETRY=10 \
     CARGO_TERM_COLOR=always
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-        musl-tools \
-        ca-certificates \
+RUN rustup target add ${TARGET} \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends musl-tools ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-RUN rustup target add ${TARGET}
-RUN cargo install --locked cargo-chef@0.1.68
-WORKDIR /work
+WORKDIR /build
+# Copy workspace manifests + sources together. Docker's layer cache reuses
+# these COPY layers (and the cargo build layer below them) as long as the
+# inputs are unchanged — no cargo-chef helper required.
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY etl-core etl-core
+COPY etl-cli etl-cli
+COPY etl-bench etl-bench
+RUN cargo build --release --target ${TARGET} --bin etl --locked
+RUN strip target/${TARGET}/release/etl
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-ARG TARGET
-COPY --from=planner /work/recipe.json recipe.json
-# Cook dependencies. This layer is cached unless Cargo.toml/Cargo.lock change.
-RUN cargo chef cook \
-        --release \
-        --target ${TARGET} \
-        --recipe-path recipe.json
-COPY . .
-RUN cargo build \
-        --release \
-        --target ${TARGET} \
-        --bin etl
-# The release profile already strips symbols, but run `strip` once more for
-# good measure on the static target.
-RUN strip /work/target/${TARGET}/release/etl
-
+# Stage 2 — minimal runtime image. No shell, no libc, no package manager.
 FROM scratch AS runtime
 ARG TARGET
 LABEL org.opencontainers.image.source="https://github.com/paiml/shipping-rust" \
       org.opencontainers.image.description="Reference etl CLI for course c9 (Shipping Rust)" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0"
-COPY --from=builder /work/target/${TARGET}/release/etl /etl
+COPY --from=builder /build/target/${TARGET}/release/etl /etl
 USER 65532:65532
 ENTRYPOINT ["/etl"]

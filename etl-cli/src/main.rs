@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn execute_happy_path() {
-        let csv_in = b"id,name,age\n1,Ada,42\n";
+        let csv_in = b"id,fruit,weight_g\n1,apple,150\n";
         let mut sink = Vec::<u8>::new();
         let report = execute(Cursor::new(&csv_in[..]), &mut sink).unwrap();
         assert_eq!(report.rows_in, 1);
@@ -151,7 +151,8 @@ mod tests {
     #[test]
     fn rows_in_equals_rows_out_contract_holds() {
         // Provable contract: ROWS_IN_EQUALS_ROWS_OUT
-        let csv_in = b"id,name,age\n1,Ada,42\nNaN,Bad,1\n3,,77\n4,Senior,90\n";
+        let csv_in =
+            b"id,fruit,weight_g\n1,apple,150\nbad_id,banana,118\n3,,77\n4,watermelon,7800\n";
         let mut sink = Vec::<u8>::new();
         let report = execute(Cursor::new(&csv_in[..]), &mut sink).unwrap();
         assert_eq!(report.rows_in, report.rows_out + report.rows_rejected);
@@ -160,7 +161,7 @@ mod tests {
     #[test]
     fn report_json_roundtrip_contract_holds() {
         // Provable contract: REPORT_JSON_ROUNDTRIPS
-        let csv_in = b"id,name,age\n1,Ada,42\n2,Grace,80\n";
+        let csv_in = b"id,fruit,weight_g\n1,apple,150\n2,watermelon,7800\n";
         let mut sink = Vec::<u8>::new();
         let report = execute(Cursor::new(&csv_in[..]), &mut sink).unwrap();
         let report_json = serde_json::to_string(&report).unwrap();
@@ -189,11 +190,11 @@ mod tests {
     #[test]
     fn open_input_reads_real_file() {
         let path = unique_tmp("input");
-        std::fs::write(&path, b"id,name,age\n1,Ada,42\n").unwrap();
+        std::fs::write(&path, b"id,fruit,weight_g\n1,apple,150\n").unwrap();
         let mut r = open_input(path.to_str().unwrap()).unwrap();
         let mut buf = String::new();
         r.read_to_string(&mut buf).unwrap();
-        assert!(buf.contains("Ada"));
+        assert!(buf.contains("apple"));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -229,7 +230,11 @@ mod tests {
     fn real_main_runs_with_files() {
         let in_path = unique_tmp("real-in");
         let out_path = unique_tmp("real-out");
-        std::fs::write(&in_path, b"id,name,age\n1,Ada,42\n2,Grace,80\nNaN,Bad,1\n").unwrap();
+        std::fs::write(
+            &in_path,
+            b"id,fruit,weight_g\n1,apple,150\n2,banana,118\nbad_id,cherry,8\n",
+        )
+        .unwrap();
         let args = Args {
             input: Some(in_path.to_string_lossy().into_owned()),
             output: Some(out_path.to_string_lossy().into_owned()),

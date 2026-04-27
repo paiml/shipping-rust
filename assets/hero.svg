@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ce422b" stop-opacity="0.18"/>
+      <stop offset="0.6" stop-color="#0d1117" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background: dark base + warm Rust-orange wash from upper-left -->
+  <rect width="1280" height="640" fill="#0d1117"/>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="640" y="240" text-anchor="middle"
+        font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+        font-weight="800" font-size="120" fill="#ce422b">Shipping Rust</text>
+
+  <!-- Subtitle (mono) -->
+  <text x="640" y="315" text-anchor="middle"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="36" fill="#a5d6ff">Cargo · CI · Benchmarks · Containers</text>
+
+  <!-- Tagline -->
+  <text x="640" y="380" text-anchor="middle"
+        font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+        font-size="22" fill="#7d8590">100% line coverage · sub-1 MB scratch container · pmat comply clean</text>
+
+  <!-- Apple at x=540 -->
+  <g transform="translate(540 500)">
+    <ellipse cx="0" cy="6" rx="38" ry="36" fill="#e74c3c" stroke="#7f1d1d" stroke-width="3.5"/>
+    <rect x="-3" y="-38" width="6" height="14" fill="#5b3a1a" stroke="#3a2410" stroke-width="3.5"/>
+    <ellipse cx="14" cy="-30" rx="14" ry="6" fill="#27ae60" stroke="#0f5132" stroke-width="3.5" transform="rotate(-25 14 -30)"/>
+  </g>
+
+  <!-- Banana at x=640 -->
+  <g transform="translate(640 500)">
+    <path d="M -38 -8 Q -22 -42 14 -38 Q 40 -34 36 -8 Q 32 22 4 28 Q -28 34 -40 14 Z"
+          fill="#f1c40f" stroke="#9a7d0a" stroke-width="3.5" stroke-linejoin="round"/>
+    <path d="M -32 -10 Q -18 -34 10 -32" fill="none" stroke="#fff5cc" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <rect x="34" y="-40" width="5" height="9" fill="#5b3a1a" stroke="#3a2410" stroke-width="2"/>
+  </g>
+
+  <!-- Cherry pair at x=740 -->
+  <g transform="translate(740 500)">
+    <!-- stems -->
+    <path d="M -10 -2 Q -2 -28 -8 -42" fill="none" stroke="#27ae60" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M 14 0 Q 6 -22 -2 -42" fill="none" stroke="#27ae60" stroke-width="3.5" stroke-linecap="round"/>
+    <!-- leaf -->
+    <ellipse cx="-2" cy="-44" rx="10" ry="5" fill="#2ecc71" stroke="#0f5132" stroke-width="3" transform="rotate(20 -2 -44)"/>
+    <!-- berries -->
+    <circle cx="-12" cy="8" r="20" fill="#c0392b" stroke="#641e16" stroke-width="3.5"/>
+    <circle cx="16" cy="10" r="20" fill="#c0392b" stroke="#641e16" stroke-width="3.5"/>
+    <!-- highlights -->
+    <ellipse cx="-18" cy="2" rx="4" ry="3" fill="#fff" opacity="0.55"/>
+    <ellipse cx="10" cy="4" rx="4" ry="3" fill="#fff" opacity="0.55"/>
+  </g>
+
+  <!-- Bottom mono caption -->
+  <text x="640" y="600" text-anchor="middle"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="18" fill="#6e7681">github.com/paiml/shipping-rust</text>
+</svg>

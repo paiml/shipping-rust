@@ -5,8 +5,8 @@
 //!
 //! The crate is intentionally small:
 //!
-//! - `RowSchema` (private) holds the required input columns (`id`, `name`,
-//!   optional `age`).
+//! - `RowSchema` (private) holds the required input columns (`id`, `fruit`,
+//!   optional `weight_g`).
 //! - [`Record`] is the typed output written as one JSON object per line.
 //! - [`Report`] is the row-aligned summary every run produces.
 //! - [`EtlError`] is the error enum (one variant per failure mode).
@@ -40,12 +40,12 @@ pub enum EtlError {
     CsvParse(#[from] csv::Error),
 
     /// The header row was missing one of the required columns
-    /// (`id`, `name`, `age`).
+    /// (`id`, `fruit`, `weight_g`).
     #[error("missing required column: {0}")]
     MissingColumn(String),
 
     /// The header row had no fields at all (empty input).
-    #[error("empty header — expected id,name,age")]
+    #[error("empty header — expected id,fruit,weight_g")]
     EmptyHeader,
 
     /// Writing a record to the JSON Lines sink failed.
@@ -67,10 +67,10 @@ pub enum EtlError {
 pub enum ErrorKind {
     /// `id` could not be parsed as `u64`.
     InvalidId,
-    /// `name` was empty after trimming.
-    EmptyName,
-    /// `age` was present but not parseable as `u32`.
-    InvalidAge,
+    /// `fruit` was empty after trimming.
+    EmptyFruit,
+    /// `weight_g` was present but not parseable as `u32`.
+    InvalidWeight,
     /// The row had fewer columns than the header declared.
     ShortRow,
 }
@@ -81,8 +81,8 @@ impl ErrorKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InvalidId => "invalid_id",
-            Self::EmptyName => "empty_name",
-            Self::InvalidAge => "invalid_age",
+            Self::EmptyFruit => "empty_fruit",
+            Self::InvalidWeight => "invalid_weight",
             Self::ShortRow => "short_row",
         }
     }
@@ -100,8 +100,8 @@ impl std::fmt::Display for ErrorKind {
 #[derive(Debug, Clone, Copy)]
 struct RowSchema {
     id: usize,
-    name: usize,
-    age: Option<usize>,
+    fruit: usize,
+    weight_g: Option<usize>,
 }
 
 impl RowSchema {
@@ -111,49 +111,50 @@ impl RowSchema {
         }
 
         let mut id: Option<usize> = None;
-        let mut name: Option<usize> = None;
-        let mut age: Option<usize> = None;
+        let mut fruit: Option<usize> = None;
+        let mut weight_g: Option<usize> = None;
 
         for (i, field) in header.iter().enumerate() {
             match field.trim().to_ascii_lowercase().as_str() {
                 "id" => id = Some(i),
-                "name" => name = Some(i),
-                "age" => age = Some(i),
+                "fruit" => fruit = Some(i),
+                "weight_g" => weight_g = Some(i),
                 _ => {}
             }
         }
 
         Ok(Self {
             id: id.ok_or_else(|| EtlError::MissingColumn("id".into()))?,
-            name: name.ok_or_else(|| EtlError::MissingColumn("name".into()))?,
-            age,
+            fruit: fruit.ok_or_else(|| EtlError::MissingColumn("fruit".into()))?,
+            weight_g,
         })
     }
 }
 
-/// Coarse age bucket attached to every output record.
+/// Coarse size bucket attached to every output record, derived from
+/// `weight_g`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgeBucket {
-    /// `age` was missing.
+#[serde(rename_all = "PascalCase")]
+pub enum SizeBucket {
+    /// `weight_g` was missing.
     Unknown,
-    /// `age < 18`.
-    Minor,
-    /// `18 <= age < 65`.
-    Adult,
-    /// `age >= 65`.
-    Senior,
+    /// `weight_g < 100`.
+    Small,
+    /// `100 <= weight_g < 300`.
+    Medium,
+    /// `weight_g >= 300`.
+    Large,
 }
 
-impl AgeBucket {
-    /// Bucket for an optional age; `None` → [`AgeBucket::Unknown`].
+impl SizeBucket {
+    /// Bucket for an optional weight in grams; `None` → [`SizeBucket::Unknown`].
     #[must_use]
-    pub fn from_age(age: Option<u32>) -> Self {
-        match age {
+    pub fn from_weight_g(weight_g: Option<u32>) -> Self {
+        match weight_g {
             None => Self::Unknown,
-            Some(a) if a < 18 => Self::Minor,
-            Some(a) if a < 65 => Self::Adult,
-            Some(_) => Self::Senior,
+            Some(w) if w < 100 => Self::Small,
+            Some(w) if w < 300 => Self::Medium,
+            Some(_) => Self::Large,
         }
     }
 }
@@ -163,10 +164,10 @@ impl AgeBucket {
 pub struct Record {
     /// Stable numeric identifier, parsed from the CSV `id` column.
     pub id: u64,
-    /// Trimmed display name from the `name` column.
-    pub name: String,
-    /// Categorized age, derived from the optional `age` column.
-    pub age_bucket: AgeBucket,
+    /// Trimmed fruit name from the `fruit` column.
+    pub fruit: String,
+    /// Categorized size, derived from the optional `weight_g` column.
+    pub size_bucket: SizeBucket,
 }
 
 /// Row-aligned summary of one [`run`] invocation.
@@ -198,7 +199,7 @@ impl Report {
 /// # Errors
 ///
 /// - [`EtlError::EmptyHeader`] — the input has no header row at all.
-/// - [`EtlError::MissingColumn`] — required column (`id` or `name`) is absent.
+/// - [`EtlError::MissingColumn`] — required column (`id` or `fruit`) is absent.
 /// - [`EtlError::CsvParse`] — the CSV stream is malformed.
 /// - [`EtlError::Io`] — writing to the sink fails.
 /// - [`EtlError::Json`] — record serialization fails (in practice unreachable).
@@ -224,8 +225,8 @@ pub fn run<R: Read, W: Write>(input: R, mut output: W) -> Result<Report, EtlErro
 
 /// Validate, transform, and emit a single CSV record.
 ///
-/// On a structural reject (short row, bad id, empty name, bad age) the helper
-/// notes the rejection on `report` and returns `Ok(())`. On a successful
+/// On a structural reject (short row, bad id, empty fruit, bad weight) the
+/// helper notes the rejection on `report` and returns `Ok(())`. On a successful
 /// transform it writes one JSON Lines record to `output` and bumps
 /// `report.rows_out`. Only true I/O or serializer failures bubble up.
 fn process_row<W: Write>(
@@ -234,8 +235,8 @@ fn process_row<W: Write>(
     output: &mut W,
     report: &mut Report,
 ) -> Result<(), EtlError> {
-    let max_idx = schema.age.map_or(schema.name.max(schema.id), |a| {
-        schema.id.max(schema.name).max(a)
+    let max_idx = schema.weight_g.map_or(schema.fruit.max(schema.id), |w| {
+        schema.id.max(schema.fruit).max(w)
     });
     if record_buf.len() <= max_idx {
         report.note_reject(ErrorKind::ShortRow);
@@ -245,20 +246,20 @@ fn process_row<W: Write>(
     let Some(id) = parse_id(record_buf.get(schema.id).unwrap_or(""), report) else {
         return Ok(());
     };
-    let Some(name) = parse_name(record_buf.get(schema.name).unwrap_or(""), report) else {
+    let Some(fruit) = parse_fruit(record_buf.get(schema.fruit).unwrap_or(""), report) else {
         return Ok(());
     };
-    let age_str = schema.age.and_then(|i| record_buf.get(i));
-    let age = match parse_age(age_str, report) {
-        AgeOutcome::Reject => return Ok(()),
-        AgeOutcome::Absent => None,
-        AgeOutcome::Parsed(n) => Some(n),
+    let weight_str = schema.weight_g.and_then(|i| record_buf.get(i));
+    let weight_g = match parse_weight_g(weight_str, report) {
+        WeightOutcome::Reject => return Ok(()),
+        WeightOutcome::Absent => None,
+        WeightOutcome::Parsed(n) => Some(n),
     };
 
     let record = Record {
         id,
-        name,
-        age_bucket: AgeBucket::from_age(age),
+        fruit,
+        size_bucket: SizeBucket::from_weight_g(weight_g),
     };
     let line = serde_json::to_string(&record)?;
     output.write_all(line.as_bytes())?;
@@ -277,37 +278,37 @@ fn parse_id(cell: &str, report: &mut Report) -> Option<u64> {
     }
 }
 
-/// Parse the `name` cell. Returns `None` and notes the rejection on empty input.
-fn parse_name(cell: &str, report: &mut Report) -> Option<String> {
+/// Parse the `fruit` cell. Returns `None` and notes the rejection on empty input.
+fn parse_fruit(cell: &str, report: &mut Report) -> Option<String> {
     let trimmed = cell.trim();
     if trimmed.is_empty() {
-        report.note_reject(ErrorKind::EmptyName);
+        report.note_reject(ErrorKind::EmptyFruit);
         None
     } else {
         Some(trimmed.to_string())
     }
 }
 
-/// Outcome of parsing the optional `age` cell. Distinguishes "no value
+/// Outcome of parsing the optional `weight_g` cell. Distinguishes "no value
 /// provided" from "value provided and parsed" from "value provided but
 /// malformed (rejected)".
-enum AgeOutcome {
+enum WeightOutcome {
     Absent,
     Parsed(u32),
     Reject,
 }
 
-/// Parse the optional `age` cell. On a malformed value the rejection is
-/// noted on `report` and [`AgeOutcome::Reject`] is returned.
-fn parse_age(cell: Option<&str>, report: &mut Report) -> AgeOutcome {
+/// Parse the optional `weight_g` cell. On a malformed value the rejection is
+/// noted on `report` and [`WeightOutcome::Reject`] is returned.
+fn parse_weight_g(cell: Option<&str>, report: &mut Report) -> WeightOutcome {
     match cell.map(str::trim) {
-        None | Some("") => AgeOutcome::Absent,
+        None | Some("") => WeightOutcome::Absent,
         Some(s) => {
             if let Ok(parsed) = s.parse::<u32>() {
-                AgeOutcome::Parsed(parsed)
+                WeightOutcome::Parsed(parsed)
             } else {
-                report.note_reject(ErrorKind::InvalidAge);
-                AgeOutcome::Reject
+                report.note_reject(ErrorKind::InvalidWeight);
+                WeightOutcome::Reject
             }
         }
     }
@@ -327,7 +328,8 @@ mod tests {
 
     #[test]
     fn happy_path_three_rows() {
-        let csv_in = "id,name,age\n1,Ada,42\n2,Grace,80\n3,Linus,16\n";
+        // apple → Medium (150 g), watermelon → Large (7800 g), grape → Small (5 g).
+        let csv_in = "id,fruit,weight_g\n1,apple,150\n2,watermelon,7800\n3,grape,5\n";
         let (report, out) = run_str(csv_in);
 
         assert_eq!(report.rows_in, 3);
@@ -337,29 +339,29 @@ mod tests {
 
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 3);
-        assert!(lines[0].contains("\"age_bucket\":\"adult\""));
-        assert!(lines[1].contains("\"age_bucket\":\"senior\""));
-        assert!(lines[2].contains("\"age_bucket\":\"minor\""));
+        assert!(lines[0].contains("\"size_bucket\":\"Medium\""));
+        assert!(lines[1].contains("\"size_bucket\":\"Large\""));
+        assert!(lines[2].contains("\"size_bucket\":\"Small\""));
     }
 
     #[test]
-    fn missing_age_column_yields_unknown_bucket() {
-        let (report, out) = run_str("id,name\n7,Ada\n");
+    fn missing_weight_column_yields_unknown_bucket() {
+        let (report, out) = run_str("id,fruit\n7,banana\n");
         assert_eq!(report.rows_in, 1);
         assert_eq!(report.rows_out, 1);
-        assert!(out.contains("\"age_bucket\":\"unknown\""));
+        assert!(out.contains("\"size_bucket\":\"Unknown\""));
     }
 
     #[test]
-    fn blank_age_field_yields_unknown_bucket() {
-        let (report, out) = run_str("id,name,age\n7,Ada,\n");
+    fn blank_weight_field_yields_unknown_bucket() {
+        let (report, out) = run_str("id,fruit,weight_g\n7,banana,\n");
         assert_eq!(report.rows_out, 1);
-        assert!(out.contains("\"age_bucket\":\"unknown\""));
+        assert!(out.contains("\"size_bucket\":\"Unknown\""));
     }
 
     #[test]
     fn invalid_id_is_rejected() {
-        let (report, out) = run_str("id,name,age\nNaN,Ada,42\n");
+        let (report, out) = run_str("id,fruit,weight_g\nbad_id,apple,150\n");
         assert_eq!(report.rows_in, 1);
         assert_eq!(report.rows_out, 0);
         assert_eq!(report.rows_rejected, 1);
@@ -368,17 +370,20 @@ mod tests {
     }
 
     #[test]
-    fn empty_name_is_rejected() {
-        let (report, _) = run_str("id,name,age\n1,   ,42\n");
+    fn empty_fruit_is_rejected() {
+        let (report, _) = run_str("id,fruit,weight_g\n1,   ,150\n");
         assert_eq!(report.rows_rejected, 1);
-        assert_eq!(report.errors_by_kind.get("empty_name").copied(), Some(1));
+        assert_eq!(report.errors_by_kind.get("empty_fruit").copied(), Some(1));
     }
 
     #[test]
-    fn invalid_age_is_rejected() {
-        let (report, _) = run_str("id,name,age\n1,Ada,quarantine\n");
+    fn invalid_weight_is_rejected() {
+        let (report, _) = run_str("id,fruit,weight_g\n1,apple,not_a_number\n");
         assert_eq!(report.rows_rejected, 1);
-        assert_eq!(report.errors_by_kind.get("invalid_age").copied(), Some(1));
+        assert_eq!(
+            report.errors_by_kind.get("invalid_weight").copied(),
+            Some(1)
+        );
     }
 
     #[test]
@@ -386,7 +391,7 @@ mod tests {
         // Only one column on the data row, but the header declares three.
         // `flexible(true)` lets the parser ignore the column-count mismatch
         // so we can flag it as ShortRow rather than failing the whole stream.
-        let (report, _) = run_str("id,name,age\n1\n");
+        let (report, _) = run_str("id,fruit,weight_g\n1\n");
         assert_eq!(report.rows_rejected, 1);
         assert_eq!(report.errors_by_kind.get("short_row").copied(), Some(1));
     }
@@ -394,14 +399,14 @@ mod tests {
     #[test]
     fn missing_required_column_errors() {
         let mut sink = Vec::<u8>::new();
-        let err = run(Cursor::new(b"id,age\n1,42\n"), &mut sink).unwrap_err();
-        assert!(matches!(&err, EtlError::MissingColumn(c) if c == "name"));
+        let err = run(Cursor::new(b"id,weight_g\n1,150\n"), &mut sink).unwrap_err();
+        assert!(matches!(&err, EtlError::MissingColumn(c) if c == "fruit"));
     }
 
     #[test]
     fn missing_id_column_errors() {
         let mut sink = Vec::<u8>::new();
-        let err = run(Cursor::new(b"name,age\nAda,42\n"), &mut sink).unwrap_err();
+        let err = run(Cursor::new(b"fruit,weight_g\napple,150\n"), &mut sink).unwrap_err();
         assert!(matches!(&err, EtlError::MissingColumn(c) if c == "id"));
     }
 
@@ -426,7 +431,7 @@ mod tests {
     #[test]
     fn unknown_header_column_is_ignored() {
         // Exercise the `_ => {}` arm of the header-column matcher.
-        let (report, out) = run_str("id,name,age,extra\n1,Ada,42,trailing\n");
+        let (report, out) = run_str("id,fruit,weight_g,extra\n1,apple,150,trailing\n");
         assert_eq!(report.rows_in, 1);
         assert_eq!(report.rows_out, 1);
         assert!(out.contains("\"id\":1"));
@@ -474,7 +479,11 @@ mod tests {
 
     #[test]
     fn write_error_surfaces_as_io() {
-        let err = run(Cursor::new(b"id,name,age\n1,Ada,42\n"), FailingWriter).unwrap_err();
+        let err = run(
+            Cursor::new(b"id,fruit,weight_g\n1,apple,150\n"),
+            FailingWriter,
+        )
+        .unwrap_err();
         assert!(matches!(err, EtlError::Io(_)));
     }
 
@@ -489,7 +498,8 @@ mod tests {
     #[test]
     fn rows_in_equals_rows_out_plus_rejected() {
         // The binary-level provable contract — exercise it from the lib too.
-        let csv_in = "id,name,age\n1,Ada,42\nNaN,Bad,1\n3,,77\n4,Senior,90\n";
+        let csv_in =
+            "id,fruit,weight_g\n1,apple,150\nbad_id,banana,118\n3,,77\n4,watermelon,7800\n";
         let (report, _) = run_str(csv_in);
         assert_eq!(report.rows_in, report.rows_out + report.rows_rejected);
     }
@@ -498,8 +508,8 @@ mod tests {
     fn error_kind_display_and_str_match() {
         for k in [
             ErrorKind::InvalidId,
-            ErrorKind::EmptyName,
-            ErrorKind::InvalidAge,
+            ErrorKind::EmptyFruit,
+            ErrorKind::InvalidWeight,
             ErrorKind::ShortRow,
         ] {
             assert_eq!(format!("{k}"), k.as_str());
@@ -507,14 +517,15 @@ mod tests {
     }
 
     #[test]
-    fn age_bucket_boundaries() {
-        assert_eq!(AgeBucket::from_age(None), AgeBucket::Unknown);
-        assert_eq!(AgeBucket::from_age(Some(0)), AgeBucket::Minor);
-        assert_eq!(AgeBucket::from_age(Some(17)), AgeBucket::Minor);
-        assert_eq!(AgeBucket::from_age(Some(18)), AgeBucket::Adult);
-        assert_eq!(AgeBucket::from_age(Some(64)), AgeBucket::Adult);
-        assert_eq!(AgeBucket::from_age(Some(65)), AgeBucket::Senior);
-        assert_eq!(AgeBucket::from_age(Some(120)), AgeBucket::Senior);
+    fn size_bucket_boundaries() {
+        // None → Unknown; <100 → Small; 100..299 → Medium; >=300 → Large.
+        assert_eq!(SizeBucket::from_weight_g(None), SizeBucket::Unknown);
+        assert_eq!(SizeBucket::from_weight_g(Some(0)), SizeBucket::Small);
+        assert_eq!(SizeBucket::from_weight_g(Some(99)), SizeBucket::Small);
+        assert_eq!(SizeBucket::from_weight_g(Some(100)), SizeBucket::Medium);
+        assert_eq!(SizeBucket::from_weight_g(Some(299)), SizeBucket::Medium);
+        assert_eq!(SizeBucket::from_weight_g(Some(300)), SizeBucket::Large);
+        assert_eq!(SizeBucket::from_weight_g(Some(7800)), SizeBucket::Large);
     }
 
     #[test]
@@ -528,12 +539,12 @@ mod tests {
         assert!(csv_msg.contains("csv parse error"));
 
         assert_eq!(
-            format!("{}", EtlError::MissingColumn("name".into())),
-            "missing required column: name"
+            format!("{}", EtlError::MissingColumn("fruit".into())),
+            "missing required column: fruit"
         );
         assert_eq!(
             format!("{}", EtlError::EmptyHeader),
-            "empty header — expected id,name,age"
+            "empty header — expected id,fruit,weight_g"
         );
         let io_msg = format!(
             "{}",

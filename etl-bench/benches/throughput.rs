@@ -1,7 +1,8 @@
 //! Throughput benchmarks for `etl_core::run`.
 //!
 //! Three sizes (1 000 / 10 000 / 100 000 rows) measured with
-//! `Throughput::Elements` so criterion reports rows/sec.
+//! `Throughput::Elements` so criterion reports rows/sec. Each row is a
+//! synthetic fruit measurement (`id,fruit,weight_g`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, missing_docs)]
 

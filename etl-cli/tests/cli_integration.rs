@@ -38,7 +38,11 @@ fn unique_tmp(name: &str) -> PathBuf {
 fn binary_runs_with_stdin_and_files() {
     let in_path = unique_tmp("stdin-in");
     let out_path = unique_tmp("stdin-out");
-    std::fs::write(&in_path, b"id,name,age\n1,Ada,42\n2,Grace,80\n").unwrap();
+    std::fs::write(
+        &in_path,
+        b"id,fruit,weight_g\n1,apple,150\n2,watermelon,7800\n",
+    )
+    .unwrap();
 
     let status = Command::new(etl_binary())
         .args([
@@ -79,7 +83,7 @@ fn binary_runs_with_stdin_pipe() {
     {
         let stdin = child.stdin.as_mut().expect("stdin pipe");
         stdin
-            .write_all(b"id,name,age\n1,Ada,42\n")
+            .write_all(b"id,fruit,weight_g\n1,apple,150\n")
             .expect("writing stdin");
     }
     let output = child.wait_with_output().expect("waiting for etl");
@@ -101,7 +105,7 @@ fn binary_runs_with_default_args() {
     {
         let stdin = child.stdin.as_mut().expect("stdin pipe");
         stdin
-            .write_all(b"id,name,age\n42,Ada,28\n")
+            .write_all(b"id,fruit,weight_g\n42,nectarine,160\n")
             .expect("writing stdin");
     }
     let output = child.wait_with_output().expect("waiting for etl");
