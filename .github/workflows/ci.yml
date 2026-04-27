@@ -54,10 +54,13 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.6
 
+      # cargo-audit 0.22+ required to parse advisories that use CVSS 4.0.
+      # Earlier versions error with `unsupported CVSS version: 4.0` when
+      # the advisory-db ships a 4.0 entry (e.g. RUSTSEC-2026-0073).
       - name: Install cargo-deny + cargo-audit
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@0.16,cargo-audit@0.21
+          tool: cargo-deny@0.16,cargo-audit@0.22
 
       # bashrs lints Makefile + Dockerfiles. provable-contracts-cli
       # (`pv`) lints the YAML contracts in contracts/. Both are pure-cargo
@@ -65,14 +68,18 @@ jobs:
       # today; the rust-cache step above keeps them warm across runs.
       #
       # Only on stable: bashrs's transitive deps (e.g. home@0.5.12)
-      # require rustc 1.88+, which is newer than our 1.85 MSRV. Running
-      # the lint once on stable is sufficient — the MSRV matrix entry
-      # exists to prove the workspace itself builds on 1.85.
+      # require rustc 1.88+, newer than our 1.85 MSRV. Running the lint
+      # once on stable is sufficient — the MSRV matrix entry exists to
+      # prove the workspace itself builds on 1.85.
+      #
+      # We also need `cargo +stable` explicitly: rust-toolchain.toml in
+      # the workspace pins channel 1.85.0, which overrides the matrix
+      # toolchain for any cargo invocation in this directory tree.
       - name: Install bashrs + pv
         if: matrix.toolchain == 'stable'
         run: |
-          cargo install bashrs --locked
-          cargo install provable-contracts-cli --locked
+          cargo +stable install bashrs --locked
+          cargo +stable install provable-contracts-cli --locked
 
       - name: Lint Makefile + Dockerfiles (bashrs)
         if: matrix.toolchain == 'stable'
