@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/paiml/shipping-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/paiml/shipping-rust/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.85-orange.svg)](rust-toolchain.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.95-orange.svg)](rust-toolchain.toml)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/paiml/shipping-rust/actions/workflows/ci.yml)
 [![Container](https://img.shields.io/badge/container-%3C2MB-success.svg)](Dockerfile)
 
@@ -59,7 +59,7 @@ Both contracts also hold under unit and integration tests (`cargo test`).
 
 ## Quick start
 
-Requires Rust **1.85.0** (pinned by [`rust-toolchain.toml`](rust-toolchain.toml)).
+Requires Rust **1.95.0** (pinned by [`rust-toolchain.toml`](rust-toolchain.toml)).
 
 ```bash
 # Build everything
@@ -133,10 +133,10 @@ layering strategy, different runtime base.
 ## CI
 
 A single GitHub Actions job named `gate` runs the full pipeline against
-both MSRV (`1.85.0`) and `stable`:
+both MSRV (`1.95.0`) and `stable`:
 
 ```
-gate (1.85.0 | stable)
+gate (1.95.0 | stable)
 ├── cargo fmt --check
 ├── cargo clippy -D warnings
 ├── cargo doc -D warnings

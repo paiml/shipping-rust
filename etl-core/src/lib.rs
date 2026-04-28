@@ -534,7 +534,7 @@ mod tests {
         // CsvParse: build a synthetic csv::Error from an io::Error so we have
         // a stable, deterministic value (no need to drive the parser).
         let csv_err: csv::Error =
-            csv::Error::from(io::Error::new(io::ErrorKind::Other, "synthetic"));
+            csv::Error::from(io::Error::other("synthetic"));
         let csv_msg = format!("{}", EtlError::CsvParse(csv_err));
         assert!(csv_msg.contains("csv parse error"));
 
@@ -548,7 +548,7 @@ mod tests {
         );
         let io_msg = format!(
             "{}",
-            EtlError::Io(io::Error::new(io::ErrorKind::Other, "boom"))
+            EtlError::Io(io::Error::other("boom"))
         );
         assert!(io_msg.contains("io error"));
 
