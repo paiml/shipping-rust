@@ -65,6 +65,29 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Local-CI parity** — `make ship-ready` now also runs `bashrs lint`
   and `pmat comply`, so a green local run matches the CI `gate`
   aggregator.
+- **`.pmat-gates.toml`** — declarative shadow of the thresholds the
+  `gate` job enforces (MSRV 1.95.0, 100% line coverage, clippy `-D
+  warnings`, audit + deny, 8 MiB binary budget, criterion harness).
+  Lifts `pmat repo-score` from 85.0/A- to 87.5/A- by closing the
+  PMAT Compliance gap (2.5/5 → 5.0/5).
+- **Standalone bench workflow** — `.github/workflows/bench.yml` runs
+  the full criterion suite (warmup + 100 samples × 3 sizes) on a
+  self-hosted `intel` runner from the paiml org runner pool.
+  Triggered manually, weekly via cron, or on `main` pushes that
+  touch `etl-core/` / `etl-bench/` / `Cargo.{toml,lock}`. Results
+  are committed back into `bench-results/latest/` (SUMMARY.md +
+  per-bench `estimates.json` + criterion HTML report). Self-hosted
+  runner picked for measurement quality — bare-metal CV stays under
+  1% vs 5-15% on shared GitHub-hosted VMs.
+- **`bench-results/`** — committed criterion output as a teaching
+  artifact. Seed numbers (Threadripper 7960X, ~9.6M rows/sec across
+  all three sizes) plus a README explaining what's tracked, why
+  benchmark output belongs in the repo, and how to read the JSON
+  estimates. Workflow runs overwrite `latest/`; git history
+  preserves drift.
+- **README throughput badge + Benchmarks section** — links to
+  `bench-results/latest/SUMMARY.md` and explains the smoke-vs-full
+  split between `gate` and `bench` workflows.
 
 ## [0.1.0] - 2026-04-26
 

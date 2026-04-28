@@ -3,10 +3,12 @@
 </p>
 
 [![CI](https://github.com/paiml/shipping-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/paiml/shipping-rust/actions/workflows/ci.yml)
+[![Bench](https://github.com/paiml/shipping-rust/actions/workflows/bench.yml/badge.svg)](https://github.com/paiml/shipping-rust/actions/workflows/bench.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![MSRV](https://img.shields.io/badge/MSRV-1.95-orange.svg)](rust-toolchain.toml)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/paiml/shipping-rust/actions/workflows/ci.yml)
 [![Container](https://img.shields.io/badge/container-%3C2MB-success.svg)](Dockerfile)
+[![Throughput](https://img.shields.io/badge/throughput-9.6M%20rows%2Fsec-blue.svg)](bench-results/latest/SUMMARY.md)
 
 # shipping-rust
 
@@ -134,6 +136,55 @@ A glibc-linked variant is available at [`Dockerfile.distroless-cc`](Dockerfile.d
 for workloads that need a libc / TLS roots / `/etc/passwd` (Google's
 distroless `cc-debian12:nonroot` base, ~25 MB). Same plain-multi-stage
 layering strategy, different runtime base.
+
+## Benchmarks
+
+The `gate` job in CI runs `cargo bench -- --test` on every PR — that's
+"smoke mode": compile each criterion bench, run its body once, fail if
+it panics, don't record samples. It proves the harness works without
+paying the 30s+ per-bench statistical-sampling cost on every push.
+
+The full criterion suite — warmup + 100 samples × 3 input sizes — runs
+in a separate workflow,
+[`.github/workflows/bench.yml`](.github/workflows/bench.yml), on a
+**self-hosted `intel` runner** from the paiml org runner pool. Triggers:
+
+- `workflow_dispatch` — manual run from the Actions tab
+- weekly cron — Sundays 06:00 UTC, drift check against `main`
+- push to `main` when `etl-core/`, `etl-bench/`, or `Cargo.{toml,lock}` change
+
+Why a self-hosted runner? GitHub-hosted shared VMs run with 5-15%
+coefficient of variation, which makes anything below a ~10%
+regression invisible. On bare metal CV stays under 1%, so a 2%
+regression is real signal. For a teaching repo, signal quality is
+worth the operational cost.
+
+The workflow commits results back into [`bench-results/latest/`](bench-results/),
+keeping the repo as the source of truth for "is this fast?":
+
+| Size | Mean | Throughput |
+|------|------|-----------|
+| 1k rows | ~111 µs | ~9.0M rows/sec |
+| 10k rows | ~1.0 ms | ~9.7M rows/sec |
+| 100k rows | ~10.4 ms | ~9.6M rows/sec |
+
+(Numbers from a Threadripper 7960X seed run — see
+[`bench-results/latest/SUMMARY.md`](bench-results/latest/SUMMARY.md)
+for the full meta + JSON.) Constant throughput across input sizes is
+the key signal — confirms the pipeline is linear in input size, with
+per-call overhead amortized away by 10k rows.
+
+```bash
+make bench         # full criterion suite locally (~30s)
+make bench-smoke   # CI smoke mode (compile + run-once)
+```
+
+After a workflow run, pull and diff against the saved baseline:
+
+```bash
+git pull
+cargo bench --workspace -- --baseline main
+```
 
 ## Releases
 

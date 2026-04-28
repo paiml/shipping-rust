@@ -1,0 +1,219 @@
+# Standalone criterion benchmark workflow for shipping-rust.
+#
+# Why a separate workflow? The main `gate` job in ci.yml runs
+# `cargo bench -- --test` (smoke mode — compile + run-once, no
+# samples). That proves the harness works without paying the 30s+
+# per-bench statistical sampling cost on every PR.
+#
+# This workflow runs the *full* criterion suite — warmup + 100
+# samples × 3 input sizes — and commits the rendered results back
+# into `bench-results/` on `main`. Triggered manually
+# (`workflow_dispatch`) or weekly via cron, never on PR.
+#
+# Runs on a self-hosted `intel` runner from the paiml org runner
+# pool. GitHub-hosted runners are too noisy for criterion — the
+# CV (coefficient of variation) on shared VMs is ~5-15%, vs <1%
+# on a dedicated bare-metal box. A teaching reference repo gets
+# to use bare-metal because it makes the regression signal real.
+#
+# Triggered by:
+#   - workflow_dispatch  — manual run from the Actions tab
+#   - schedule (Sunday 06:00 UTC) — weekly drift check on main
+#   - push to main when etl-core or etl-bench change
+
+name: bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_results:
+        description: 'Commit results to bench-results/ on main'
+        required: false
+        type: boolean
+        default: true
+  schedule:
+    # Sundays at 06:00 UTC — slow week is fine for a drift check.
+    - cron: '0 6 * * 0'
+  push:
+    branches: [main]
+    paths:
+      - 'etl-core/**'
+      - 'etl-bench/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+# Don't ever overlap a benchmark run — we need clean numbers and
+# a single in-flight commit to bench-results/.
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+permissions:
+  contents: write   # commit bench-results/ back to main
+
+jobs:
+  bench:
+    name: criterion (intel self-hosted)
+    # Org-level runner pool: paiml/intel-clean-room-{1..8}. Bare-metal
+    # Linux x86_64. See `gh api /orgs/paiml/actions/runners`.
+    runs-on: [self-hosted, intel]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # We push a commit back here with the results — need full
+          # history + write token from `permissions: contents: write`.
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # rust-toolchain.toml pins 1.95.0; this just ensures the
+      # toolchain + components are installed on the runner. Idempotent.
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bench-1.95.0
+          # Bench builds use --release; cache target/release separately
+          # from the gate job so we don't thrash either cache.
+          cache-targets: true
+
+      # Pin the runner's CPU governor to performance during the bench.
+      # Self-hosted runners in the clean-room pool default to schedutil,
+      # which adds ~3-5% CV on the smaller bench sizes. Restored at end.
+      - name: Pin CPU governor to performance
+        run: |
+          set -euo pipefail
+          if command -v cpupower >/dev/null 2>&1; then
+            sudo cpupower frequency-set -g performance || true
+            cpupower frequency-info | head -10 || true
+          else
+            echo "::warning::cpupower not installed — running with default governor"
+          fi
+
+      # Full criterion run. --save-baseline names this run so we can
+      # diff against it later via `cargo bench -- --baseline main`.
+      # Output lands in target/criterion/<bench>/<size>/ as JSON +
+      # HTML; we copy a curated subset into bench-results/.
+      - name: Run criterion benches (full statistical sampling)
+        run: |
+          set -euo pipefail
+          cargo bench --workspace --bench throughput -- --save-baseline main
+          ls -la target/criterion/
+
+      - name: Capture system info (for results metadata)
+        id: sysinfo
+        run: |
+          set -euo pipefail
+          {
+            echo "host=$(hostname)"
+            echo "os=$(uname -srm)"
+            echo "cpu=$(grep 'model name' /proc/cpuinfo | head -1 | sed 's/.*: //')"
+            echo "cores=$(nproc)"
+            echo "rustc=$(rustc --version)"
+            echo "cargo=$(cargo --version)"
+            echo "git_sha=$(git rev-parse --short HEAD)"
+            echo "git_ref=${GITHUB_REF}"
+            echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee bench-meta.txt
+
+      # Curate the criterion output: keep estimates.json + report
+      # index per benchmark, drop the per-sample raw data (large +
+      # not useful for a committed artifact).
+      - name: Stage results into bench-results/
+        run: |
+          set -euo pipefail
+          mkdir -p bench-results/latest
+          # Copy summary JSON for each bench size
+          find target/criterion -name 'estimates.json' \
+            -path '*/new/estimates.json' \
+            | while read -r f; do
+                rel="${f#target/criterion/}"
+                rel="${rel%/new/estimates.json}"
+                mkdir -p "bench-results/latest/${rel}"
+                cp "$f" "bench-results/latest/${rel}/estimates.json"
+              done
+          # Copy the top-level criterion HTML report
+          if [ -d target/criterion/report ]; then
+            mkdir -p bench-results/latest/report
+            cp -r target/criterion/report/* bench-results/latest/report/
+          fi
+          # Commit metadata
+          cp bench-meta.txt bench-results/latest/meta.txt
+          # Generate a flat human-readable summary
+          {
+            echo "# Criterion bench results — ${GITHUB_SHA::7}"
+            echo
+            cat bench-meta.txt | sed 's/^/    /'
+            echo
+            echo "## Throughput (rows/sec)"
+            echo
+            echo '| Size | Mean | Std Dev | Throughput |'
+            echo '|------|------|---------|------------|'
+            for size in 1000 10000 100000; do
+              est="bench-results/latest/etl_throughput/${size}/estimates.json"
+              if [ -f "$est" ]; then
+                mean=$(jq -r '.mean.point_estimate' "$est")
+                stddev=$(jq -r '.std_dev.point_estimate' "$est")
+                # Convert ns to rows/sec: size / (mean_ns * 1e-9)
+                throughput=$(awk "BEGIN { printf \"%.0f\", ${size} / (${mean} * 1e-9) }")
+                printf '| %s | %.0f ns | %.0f ns | %s rows/sec |\n' \
+                  "$size" "$mean" "$stddev" "$throughput"
+              fi
+            done
+          } > bench-results/latest/SUMMARY.md
+          cat bench-results/latest/SUMMARY.md
+
+      # HTML report is large (~300 KB) but that's fine for a
+      # teaching repo — it's the actual criterion artifact a learner
+      # wants to click through. Keep it in-repo.
+      - name: Upload criterion HTML report (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-report-${{ github.sha }}
+          path: target/criterion/
+          retention-days: 30
+
+      - name: Restore CPU governor
+        if: always()
+        run: |
+          if command -v cpupower >/dev/null 2>&1; then
+            sudo cpupower frequency-set -g schedutil || true
+          fi
+
+      # Commit the curated results back to main. Skipped if running
+      # on a PR ref or if commit_results=false.
+      - name: Commit results to main
+        if: |
+          github.event_name != 'pull_request' &&
+          (github.event_name != 'workflow_dispatch' || inputs.commit_results == true)
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bench-results/
+          if git diff --cached --quiet; then
+            echo "No bench-results changes to commit."
+            exit 0
+          fi
+          git commit -m "$(cat <<EOF
+          bench: criterion results for ${GITHUB_SHA::7}
+
+          Auto-generated by .github/workflows/bench.yml on intel-clean-room.
+          Triggered by ${GITHUB_EVENT_NAME}.
+
+          See bench-results/latest/SUMMARY.md for the rows/sec table.
+          HTML report attached as workflow artifact.
+          EOF
+          )"
+          git push origin HEAD:main
