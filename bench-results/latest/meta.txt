@@ -1,10 +1,9 @@
-host=noah-Lambda-Vector
-os=Linux 6.8.0-90-generic x86_64
-cpu=AMD Ryzen Threadripper 7960X 24-Cores
-cores=48
+host=mac-server
+os=Linux 6.8.0-107-generic x86_64
+cpu=Intel(R) Xeon(R) W-3245 CPU @ 3.20GHz
+cores=32
 rustc=rustc 1.95.0 (59807616e 2026-04-14)
 cargo=cargo 1.95.0 (f2d3ce0bd 2026-03-21)
-git_sha=719f76c
-git_ref=refs/heads/feat/bench-workflow
-ts=2026-04-28T10:58:41Z
-trigger=local-seed-run
+git_sha=1005a55
+git_ref=refs/heads/main
+ts=2026-04-28T14:36:22Z
