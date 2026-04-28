@@ -77,18 +77,20 @@ jobs:
       # Only on stable: keeping this gate on stable avoids running the
       # lint twice across the toolchain matrix; the MSRV matrix entry
       # still proves the workspace itself builds on 1.85.
-      - name: Install prebuilt CLIs (bashrs + pv)
+      - name: Install prebuilt CLIs (bashrs + pv + pmat)
         if: matrix.toolchain == 'stable'
         env:
           BASHRS_VERSION: v6.66.1
           PV_VERSION: v0.31.2
+          PMAT_VERSION: v3.16.0
         run: |
           set -euo pipefail
           install_dir="$RUNNER_TEMP/prebuilt-bin"
           mkdir -p "$install_dir"
           for tool_spec in \
             "bashrs:paiml/bashrs:${BASHRS_VERSION}:bashrs-${BASHRS_VERSION}-x86_64-unknown-linux-gnu" \
-            "pv:paiml/aprender:${PV_VERSION}:pv-${PV_VERSION}-x86_64-unknown-linux-gnu"
+            "pv:paiml/aprender:${PV_VERSION}:pv-${PV_VERSION}-x86_64-unknown-linux-gnu" \
+            "pmat:paiml/paiml-mcp-agent-toolkit:${PMAT_VERSION}:pmat-${PMAT_VERSION}-x86_64-unknown-linux-gnu"
           do
             IFS=: read -r bin repo ver archive <<< "$tool_spec"
             url="https://github.com/${repo}/releases/download/${ver}/${archive}.tar.gz"
@@ -107,6 +109,14 @@ jobs:
       - name: Lint contracts (pv)
         if: matrix.toolchain == 'stable'
         run: pv lint contracts/
+
+      # Salvaged from PR #1 (closed): pmat is paiml's quality + compliance
+      # check. Runs the same compliance ruleset that gates other paiml
+      # repos. Stable-only — same reasoning as bashrs/pv: keeps the gate
+      # from running twice across the toolchain matrix.
+      - name: pmat comply
+        if: matrix.toolchain == 'stable'
+        run: pmat comply
 
       - name: Format
         run: cargo fmt --all -- --check
