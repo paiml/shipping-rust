@@ -1,0 +1,47 @@
+# pmat quality gates for shipping-rust
+#
+# Mirrors what `gate` enforces in CI and what `make ship-ready` runs
+# locally. Editing a threshold here is a deliberate signal that the
+# bar moved; CI is still the source of truth for whether a PR merges.
+
+[gates]
+run_clippy        = true   # cargo clippy --workspace --all-targets -- -D warnings
+clippy_strict     = true   # workspace lints: unsafe_code = forbid, pedantic on
+run_tests         = true   # cargo test --workspace --all-targets + --doc
+test_timeout      = 300
+check_coverage    = true   # cargo llvm-cov --fail-under-lines 100
+min_coverage      = 100.0  # 100% line coverage gate (etl-core + etl-cli)
+check_complexity  = true
+max_complexity    = 15
+
+# Cargo workspace-specific gates
+[gates.workspace]
+# Toolchain pin — must match rust-toolchain.toml + [workspace.package].rust-version
+msrv             = "1.95.0"
+
+# Supply chain
+run_audit        = true    # cargo audit --deny warnings
+run_deny         = true    # cargo deny check
+run_doc          = true    # cargo doc -D warnings (no broken intra-doc links)
+
+# Format / repo shape
+fmt_check        = true    # cargo fmt --all -- --check
+bashrs_lint      = true    # bashrs lint Makefile + Dockerfiles
+pv_lint          = true    # pv lint contracts/
+
+# Binary size / artifact gates
+[gates.binary]
+# Strip+musl scratch-image target for `etl`. Hard fail above this.
+max_release_bytes = 8_388_608   # 8 MiB
+
+# Bench harness — smoke-tested in CI (--test), full criterion run locally
+[gates.bench]
+harness          = "criterion"
+smoke_in_ci      = true    # cargo bench --workspace -- --test
+full_locally     = true    # cargo bench --workspace
+sizes            = [1_000, 10_000, 100_000]   # rows-per-bench (Throughput::Elements)
+
+# Container size budget — informational, not enforced as a gate today
+[gates.container]
+scratch_target_mb     = 2     # README claim: <2 MB scratch+musl image
+distroless_target_mb  = 30    # README claim: ~25 MB distroless cc-debian12

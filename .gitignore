@@ -20,6 +20,7 @@ Cargo.lock.bak
 # pmat (everything generated; only project.toml is checked in if curated)
 /.pmat-work/
 /.pmat/
+/.pmat-metrics/
 
 # provable-contracts CLI state cache (root + contracts/ subtree)
 /.pv/
