@@ -27,12 +27,44 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   manifests are copied before sources so `cargo fetch --locked` caches
   independently of source edits — stock Docker layer caching is
   sufficient at this workspace size.
+- **Rust toolchain pin bumped 1.85.0 → 1.95.0** across
+  `rust-toolchain.toml`, `[workspace.package].rust-version`, the CI
+  matrix MSRV entry, both Dockerfiles' `rust:1.95-slim` digest, and
+  the README MSRV badge + prose. Auto-applied four clippy 1.95
+  diagnostics to keep `clippy -D warnings` green: `io_other_error`
+  ×2 in `etl-core`, `map_unwrap_or` ×2 in `etl-cli`.
 
 ### Added
 
 - `assets/hero.png` (1280×640) — repo hero image used by the GitHub
   social card and the README header. Drawn from SVG primitives in
   `assets/hero.svg`; converted with `cairosvg`.
+- **Tag-driven release workflow** — `.github/workflows/release.yml`
+  publishes prebuilt `etl` binaries to the GitHub Release page (4
+  Linux targets: x86_64 / aarch64 × musl / gnu, each with a `.sha256`
+  companion) and scratch + distroless container images to
+  `ghcr.io/paiml/shipping-rust` (`:latest`, `:distroless`, `:vX.Y.Z`,
+  `:vX.Y.Z-distroless`) on every `vX.Y.Z` tag. Aarch64 targets cross-
+  compile through pinned `cross` v0.2.5; x86_64 targets are native.
+  Container package is public — anonymous `docker pull` works without
+  a GHCR login. No crates.io publish; shipping-rust is a teaching
+  reference, not a published crate.
+- **CI `gate` aggregator job** — collapses the strategy.matrix
+  (`gate-matrix (1.95.0)` and `gate-matrix (stable)`) into a single
+  status check named literally `gate`. The branch ruleset on `main`
+  requires that exact name, which matrix expansion does not emit.
+- **`pmat comply` CI gate (stable-only)** — paiml's quality + compliance
+  check joins the existing `bashrs lint Makefile + Dockerfiles` and
+  `pv lint contracts/` steps via the same prebuilt-CLI install loop
+  (binaries downloaded from each tool's GitHub release rather than
+  built from source).
+- **README badges** — CI status, license (MIT OR Apache-2.0), MSRV,
+  100% line coverage, and `<2 MB` container size; plus a Distribution
+  / Releases section documenting the GitHub Release tarballs and
+  GHCR image tags.
+- **Local-CI parity** — `make ship-ready` now also runs `bashrs lint`
+  and `pmat comply`, so a green local run matches the CI `gate`
+  aggregator.
 
 ## [0.1.0] - 2026-04-26
 

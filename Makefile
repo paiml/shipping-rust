@@ -16,7 +16,7 @@ RUSTFLAGS ?= -D warnings
 
 .PHONY: help build test test-doc lint fmt fmt-check doc coverage \
 	audit deny release size bench bench-smoke contracts contracts-check \
-	docker docker-distroless clean ship-ready
+	bashrs-lint comply docker docker-distroless clean ship-ready
 
 help:
 	@echo "shipping-rust — make targets"
@@ -36,9 +36,11 @@ help:
 	@echo "  bench          cargo bench --workspace"
 	@echo "  bench-smoke    cargo bench -- --test (no measurements)"
 	@echo "  contracts-check  pv lint contracts/ — validate provable-contract YAML"
+	@echo "  bashrs-lint    bashrs lint Makefile + Dockerfiles"
+	@echo "  comply         pmat comply — paiml quality + compliance check"
 	@echo "  docker         docker build (musl + scratch, <2 MB image)"
 	@echo "  docker-distroless  docker build (distroless cc, glibc variant)"
-	@echo "  ship-ready     full local CI gate (fmt-check, lint, doc, test, coverage, audit, deny, release, size, bench-smoke, contracts-check)"
+	@echo "  ship-ready     full local CI gate (fmt-check, lint, doc, test, coverage, audit, deny, release, size, bench-smoke, contracts-check, bashrs-lint, comply)"
 	@echo "  clean          cargo clean"
 
 build:
@@ -88,13 +90,19 @@ bench-smoke:
 contracts-check:
 	pv lint contracts
 
+bashrs-lint:
+	bashrs lint Makefile Dockerfile Dockerfile.distroless-cc
+
+comply:
+	pmat comply
+
 docker:
 	docker build -t shipping-rust:latest .
 
 docker-distroless:
 	docker build -f Dockerfile.distroless-cc -t shipping-rust:distroless .
 
-ship-ready: fmt-check lint doc test test-doc coverage audit deny release size bench-smoke contracts-check  ## the full CI gate, run on a developer machine
+ship-ready: fmt-check lint doc test test-doc coverage audit deny release size bench-smoke contracts-check bashrs-lint comply  ## the full CI gate, run on a developer machine
 	@echo ""
 	@echo "ship-ready: all gates green"
 
