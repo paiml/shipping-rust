@@ -25,6 +25,11 @@ Rust binary looks like end-to-end:
 - a multi-stage Docker build that produces a **<2 MB** scratch container
   (stock Docker layer caching only — no external build-cache helpers)
 - supply-chain hygiene via `cargo-audit` and `cargo-deny`
+- repo-shape gates on stable: `bashrs lint` (Makefile + Dockerfiles),
+  `pv lint contracts/` (provable-contract YAML), and `pmat comply`
+- a tag-driven release workflow that ships prebuilt binaries to the
+  GitHub Release page (4 Linux targets) and container images to
+  `ghcr.io/paiml/shipping-rust` (scratch + distroless)
 - dual MIT / Apache-2.0 licensing
 
 It is the companion to course c12's
@@ -130,13 +135,63 @@ for workloads that need a libc / TLS roots / `/etc/passwd` (Google's
 distroless `cc-debian12:nonroot` base, ~25 MB). Same plain-multi-stage
 layering strategy, different runtime base.
 
+## Releases
+
+Tag-driven releases (see
+[`.github/workflows/release.yml`](.github/workflows/release.yml))
+publish to two places on every `vX.Y.Z` tag.
+
+**1. GitHub Release** — prebuilt `etl` binaries for four Linux
+targets, each with a `.sha256` companion:
+
+```
+etl-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz
+etl-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
+etl-vX.Y.Z-aarch64-unknown-linux-musl.tar.gz
+etl-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz
+```
+
+aarch64 targets are cross-compiled with [`cross`](https://github.com/cross-rs/cross)
+v0.2.5; x86_64 targets are native.
+
+**2. GitHub Container Registry** — both Dockerfile variants are
+pushed as `linux/amd64` images. The package is public; anonymous
+`docker pull` works without a GHCR login:
+
+```
+ghcr.io/paiml/shipping-rust:latest             # newest scratch (default flavor)
+ghcr.io/paiml/shipping-rust:distroless         # newest distroless
+ghcr.io/paiml/shipping-rust:vX.Y.Z             # versioned scratch
+ghcr.io/paiml/shipping-rust:vX.Y.Z-distroless  # versioned distroless
+```
+
+**Cutting a release** — bump `[workspace.package].version` in
+`Cargo.toml`, tag, and push:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow verifies the tag against the workspace version, builds
+all four binaries plus both container variants, and attaches
+everything to an auto-generated GitHub Release. There is no
+crates.io publish step — shipping-rust is a teaching reference, not
+a published crate.
+
 ## CI
 
 A single GitHub Actions job named `gate` runs the full pipeline against
-both MSRV (`1.95.0`) and `stable`:
+both MSRV (`1.95.0`) and `stable`. Three repo-shape steps
+(`bashrs lint`, `pv lint contracts/`, `pmat comply`) are gated to the
+`stable` matrix entry only — the MSRV entry still proves the workspace
+itself builds on the pinned channel:
 
 ```
 gate (1.95.0 | stable)
+├── bashrs lint Makefile + Dockerfiles   (stable only)
+├── pv lint contracts/                   (stable only)
+├── pmat comply                          (stable only)
 ├── cargo fmt --check
 ├── cargo clippy -D warnings
 ├── cargo doc -D warnings
@@ -147,7 +202,7 @@ gate (1.95.0 | stable)
 ├── cargo deny check
 ├── cargo build --release
 ├── binary-size budget (<8 MB)
-└── cargo bench -- --test    (smoke)
+└── cargo bench -- --test                (smoke)
 ```
 
 If `gate` is green, the workspace is ship-ready. See
