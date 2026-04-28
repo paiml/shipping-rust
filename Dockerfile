@@ -25,8 +25,8 @@
 ARG TARGET=x86_64-unknown-linux-musl
 
 # Stage 1 — build the static musl binary.
-# Base image pinned by digest (rust:1.85-slim) to satisfy DOCKER002.
-FROM rust:1.85-slim@sha256:9f841bbe9e7d8e37ceb96ed907265a3a0df7f44e3737d0b100e7907a679acb36 AS builder
+# Base image pinned by digest (rust:1.95-slim) to satisfy DOCKER002.
+FROM rust:1.95-slim@sha256:81099830a1e1d244607b9a7a30f3ff6ecadc52134a933b4635faba24f52840c9 AS builder
 ARG TARGET
 ENV CARGO_NET_RETRY=10 \
     CARGO_TERM_COLOR=always

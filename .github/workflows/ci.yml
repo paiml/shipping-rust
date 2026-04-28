@@ -29,15 +29,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pin to the workspace MSRV (1.85.0 — the channel pinned in
+        # Pin to the workspace MSRV (1.95.0 — the channel pinned in
         # rust-toolchain.toml) and also test against current stable so we
-        # catch regressions on the latest compiler.
-        toolchain: ["1.85.0", "stable"]
+        # catch regressions on the latest compiler. Today MSRV == stable;
+        # the explicit pin is what holds the floor steady when stable
+        # advances to 1.96+.
+        toolchain: ["1.95.0", "stable"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # rust-toolchain.toml pins 1.85.0 with rustfmt + clippy +
+      # rust-toolchain.toml pins 1.95.0 with rustfmt + clippy +
       # llvm-tools-preview; for the `stable` matrix entry we install
       # explicitly with the same components.
       - name: Install Rust toolchain
@@ -76,7 +78,7 @@ jobs:
       #
       # Only on stable: keeping this gate on stable avoids running the
       # lint twice across the toolchain matrix; the MSRV matrix entry
-      # still proves the workspace itself builds on 1.85.
+      # still proves the workspace itself builds on 1.95.
       - name: Install prebuilt CLIs (bashrs + pv + pmat)
         if: matrix.toolchain == 'stable'
         env:

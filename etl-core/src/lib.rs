@@ -533,8 +533,7 @@ mod tests {
         // Construct each EtlError variant directly and exercise its Display.
         // CsvParse: build a synthetic csv::Error from an io::Error so we have
         // a stable, deterministic value (no need to drive the parser).
-        let csv_err: csv::Error =
-            csv::Error::from(io::Error::new(io::ErrorKind::Other, "synthetic"));
+        let csv_err: csv::Error = csv::Error::from(io::Error::other("synthetic"));
         let csv_msg = format!("{}", EtlError::CsvParse(csv_err));
         assert!(csv_msg.contains("csv parse error"));
 
@@ -546,10 +545,7 @@ mod tests {
             format!("{}", EtlError::EmptyHeader),
             "empty header — expected id,fruit,weight_g"
         );
-        let io_msg = format!(
-            "{}",
-            EtlError::Io(io::Error::new(io::ErrorKind::Other, "boom"))
-        );
+        let io_msg = format!("{}", EtlError::Io(io::Error::other("boom")));
         assert!(io_msg.contains("io error"));
 
         // Trigger a json error via the AlwaysFails Serialize defined above.

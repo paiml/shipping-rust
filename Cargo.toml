@@ -12,7 +12,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paiml/shipping-rust"
 authors = ["Noah Gift <noah@paiml.com>"]
-rust-version = "1.85"
+rust-version = "1.95"
 homepage = "https://github.com/paiml/shipping-rust"
 # Files explicitly excluded from any future `cargo publish` tarballs.
 # (The crates here are reference companions, not crates.io publications,
