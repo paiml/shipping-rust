@@ -1,0 +1,277 @@
+# Tag-driven release workflow for shipping-rust.
+#
+# On `push: tags: ['v*']` (or manual dispatch with a tag input):
+#   1. Verify the tag matches the workspace Cargo.toml version
+#   2. Cross-compile the `etl` binary for 4 Linux targets
+#      (x86_64/aarch64 × musl/gnu) and attach tar.gz + sha256 to the
+#      GitHub Release
+#   3. Build the scratch and distroless container images (linux/amd64)
+#      and push them to ghcr.io/paiml/shipping-rust
+#
+# Tag format: vX.Y.Z. The workflow does NOT publish to crates.io —
+# shipping-rust is a teaching reference companion, not a published crate.
+#
+# Triggered by:
+#   - `push: tags: ['v*']` — fires on any version tag
+#   - `workflow_dispatch` — manual re-run / backfill, takes a tag input
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # create GitHub Release + upload assets
+  packages: write   # push container images to ghcr.io
+
+# Serialize releases per repo so two concurrent dispatches can't fight
+# over the same release page.
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  CROSS_VERSION: v0.2.5
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # paiml/shipping-rust
+
+jobs:
+  # ── Resolve tag + verify version match ──────────────────────────
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.verify.outputs.version }}
+    steps:
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::No tag resolved"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
+
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Verify tag matches workspace version
+        id: verify
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+            TAG_VER="${BASH_REMATCH[1]}"
+          else
+            echo "::error::Tag '$TAG' must be vX.Y.Z"; exit 1
+          fi
+          # The workspace pins one shared version in [workspace.package].
+          # Read it from etl-cli (any workspace member would work).
+          CARGO_VER=$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '.packages[] | select(.name == "etl-cli") | .version')
+          if [ "$TAG_VER" != "$CARGO_VER" ]; then
+            echo "::error::Tag $TAG_VER != Cargo.toml version $CARGO_VER"; exit 1
+          fi
+          echo "version=$TAG_VER" >> "$GITHUB_OUTPUT"
+          echo "Version verified: $TAG_VER"
+
+  # ── Build + attach cross-compiled binaries ──────────────────────
+  binaries:
+    name: ${{ matrix.target }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            cross: false
+          - target: x86_64-unknown-linux-gnu
+            cross: false
+          - target: aarch64-unknown-linux-musl
+            cross: true
+          - target: aarch64-unknown-linux-gnu
+            cross: true
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # rust-toolchain.toml pins a channel; add the cross target to that
+      # pinned toolchain too so native cross-compiles don't ENOENT on core.
+      - name: Add target to workspace-pinned toolchain
+        if: ${{ !matrix.cross }}
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends musl-tools
+
+      # `cross` for aarch64; pinned to v0.2.5 (later releases have broken
+      # CI in the past — same lesson as bashrs's binary-release.yml).
+      - name: Install cross
+        if: matrix.cross
+        run: |
+          dir="$RUNNER_TEMP/cross"
+          mkdir -p "$dir"
+          curl -sL "https://github.com/cross-rs/cross/releases/download/${CROSS_VERSION}/cross-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz -C "$dir"
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      - name: Build etl
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release -p etl-cli --target ${{ matrix.target }} --locked
+          else
+            cargo build --release -p etl-cli --target ${{ matrix.target }} --locked
+          fi
+
+      - name: Strip binary
+        run: |
+          TARGET="${{ matrix.target }}"
+          BIN="target/${TARGET}/release/etl"
+          case "$TARGET" in
+            aarch64-unknown-linux-musl) STRIP=aarch64-linux-musl-strip ;;
+            aarch64-unknown-linux-gnu)  STRIP=aarch64-linux-gnu-strip ;;
+            *)                          STRIP="" ;;
+          esac
+          if [ -n "$STRIP" ]; then
+            docker run --rm -v "$PWD/target:/target:Z" \
+              "ghcr.io/cross-rs/${TARGET}:main" \
+              "$STRIP" "/$BIN"
+          else
+            strip "$BIN"
+          fi
+          ls -la "$BIN"
+
+      - name: Package archive
+        id: package
+        run: |
+          VERSION="${{ needs.prepare.outputs.tag }}"
+          TARGET="${{ matrix.target }}"
+          ARCHIVE="etl-${VERSION}-${TARGET}"
+          mkdir -p "$ARCHIVE"
+          cp "target/${TARGET}/release/etl" "$ARCHIVE/"
+          for f in README.md LICENSE-MIT LICENSE-APACHE; do
+            [ -f "$f" ] && cp "$f" "$ARCHIVE/"
+          done
+          tar czf "${ARCHIVE}.tar.gz" "$ARCHIVE"
+          shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
+          echo "archive=${ARCHIVE}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "sha=${ARCHIVE}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+          du -h "${ARCHIVE}.tar.gz"
+
+      - name: Ensure GitHub Release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.prepare.outputs.tag }}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+
+      - name: Upload binaries to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.prepare.outputs.tag }}" \
+            "${{ steps.package.outputs.archive }}" \
+            "${{ steps.package.outputs.sha }}" \
+            --clobber
+
+  # ── Build + push container images to GHCR ───────────────────────
+  containers:
+    name: container-${{ matrix.variant }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: scratch
+            dockerfile: Dockerfile
+            suffix: ""             # ghcr.io/paiml/shipping-rust:vX.Y.Z
+          - variant: distroless
+            dockerfile: Dockerfile.distroless-cc
+            suffix: -distroless    # …:vX.Y.Z-distroless
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          # Two tags per variant: the version tag and a moving alias.
+          # `latest` tracks the newest scratch (smallest, default flavor);
+          # `distroless` tracks the newest distroless variant.
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}${{ matrix.suffix }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.variant == 'scratch' && 'latest' || 'distroless' }}
+          labels: |
+            org.opencontainers.image.title=shipping-rust
+            org.opencontainers.image.description=Reference Rust workspace for course c9 (${{ matrix.variant }} variant)
+            org.opencontainers.image.version=${{ needs.prepare.outputs.tag }}
+            org.opencontainers.image.source=https://github.com/${{ env.IMAGE_NAME }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT OR Apache-2.0
+          cache-from: type=gha,scope=container-${{ matrix.variant }}
+          cache-to: type=gha,scope=container-${{ matrix.variant }},mode=max
+
+  # ── Aggregator (single status check for branch protection) ──────
+  release:
+    name: release
+    needs: [prepare, binaries, containers]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify all jobs succeeded
+        run: |
+          if [ "${{ needs.prepare.result }}" != "success" ] || \
+             [ "${{ needs.binaries.result }}" != "success" ] || \
+             [ "${{ needs.containers.result }}" != "success" ]; then
+            echo "::error::release prepare/binaries/containers did not all succeed"
+            exit 1
+          fi
+          echo "Release ${{ needs.prepare.outputs.tag }} complete"
