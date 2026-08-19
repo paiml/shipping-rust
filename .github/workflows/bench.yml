@@ -81,6 +81,24 @@ jobs:
           toolchain: '1.95.0'
           components: rustfmt, clippy
 
+      # cache-bin: false is LOAD-BEARING on a self-hosted runner.
+      #
+      # rust-cache caches ${CARGO_HOME}/bin and its post step prunes that
+      # directory back to what it recorded at restore. On a GitHub-hosted
+      # runner $HOME is ephemeral, so that is free. This job is
+      # `runs-on: [self-hosted, intel]`, and all 16 intel-clean-room-* runners
+      # share HOME=/home/noah — so ~/.cargo/bin is the FLEET'S PROVISIONED
+      # TOOLCHAIN (rustup, cargo, rustc, forjar, pmat, cargo-kani), and the
+      # post step deletes it. Every runner then fails
+      # `[pre-job.sh] FATAL: host is not provisioned`.
+      #
+      # The signature is distinctive: rustup's PROXIES are symlinks and
+      # survive, every real cargo-installed binary dies. See paiml/infra#208.
+      #
+      # rmedia hit this four times and fixed it in its own workflows on
+      # 2026-08-17. This repo was never re-reviewed in that sweep — its last
+      # commit predates it — so the same landmine sat here on main, reachable
+      # because all 16 intel runners carry the `intel` label this job selects.
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
@@ -88,6 +106,7 @@ jobs:
           # Bench builds use --release; cache target/release separately
           # from the gate job so we don't thrash either cache.
           cache-targets: true
+          cache-bin: "false"
 
       # Pin the runner's CPU governor to performance during the bench.
       # Self-hosted runners in the clean-room pool default to schedutil,
