@@ -16,7 +16,7 @@ RUSTFLAGS ?= -D warnings
 
 .PHONY: help build test test-doc lint fmt fmt-check doc coverage \
 	audit deny release size bench bench-smoke contracts contracts-check \
-	bashrs-lint comply docker docker-distroless clean ship-ready
+	bashrs-lint comply docker docker-distroless clean ship-ready rust-cache-guard
 
 help:
 	@echo "shipping-rust — make targets"
@@ -91,7 +91,14 @@ contracts-check:
 	pv lint contracts
 
 bashrs-lint:
-	bashrs lint Makefile Dockerfile Dockerfile.distroless-cc
+	bashrs lint Makefile Dockerfile Dockerfile.distroless-cc scripts/lint-rust-cache-guard.sh
+
+# No self-hosted job may cache the shared $CARGO_HOME (paiml/infra#775). The
+# --selftest runs FIRST: a lint nobody has seen fail is not evidence, and this
+# one passes trivially once the step it guards is gone.
+rust-cache-guard:
+	@bash scripts/lint-rust-cache-guard.sh --selftest
+	@bash scripts/lint-rust-cache-guard.sh
 
 comply:
 	pmat comply
