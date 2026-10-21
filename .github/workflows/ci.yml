@@ -108,6 +108,13 @@ jobs:
         if: matrix.toolchain == 'stable'
         run: bashrs lint Makefile Dockerfile Dockerfile.distroless-cc
 
+      # paiml/infra#775: no self-hosted job may cache the shared $CARGO_HOME.
+      # The selftest runs first — the scan passes trivially once the step it
+      # guards is deleted, so the instrument has to be shown capable of failing.
+      - name: No $CARGO_HOME cache on a self-hosted job
+        if: matrix.toolchain == 'stable'
+        run: make rust-cache-guard
+
       - name: Lint contracts (pv)
         if: matrix.toolchain == 'stable'
         run: pv lint contracts/

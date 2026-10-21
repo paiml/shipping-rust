@@ -81,32 +81,32 @@ jobs:
           toolchain: '1.95.0'
           components: rustfmt, clippy
 
-      # cache-bin: false is LOAD-BEARING on a self-hosted runner.
+      # NO rust-cache HERE, AND `cache-bin: "false"` WAS NEVER THE FIX.
       #
-      # rust-cache caches ${CARGO_HOME}/bin and its post step prunes that
-      # directory back to what it recorded at restore. On a GitHub-hosted
-      # runner $HOME is ephemeral, so that is free. This job is
-      # `runs-on: [self-hosted, intel]`, and all 16 intel-clean-room-* runners
-      # share HOME=/home/noah — so ~/.cargo/bin is the FLEET'S PROVISIONED
-      # TOOLCHAIN (rustup, cargo, rustc, forjar, pmat, cargo-kani), and the
-      # post step deletes it. Every runner then fails
-      # `[pre-job.sh] FATAL: host is not provisioned`.
+      # This job used to carry `Swatinem/rust-cache@v2` with
+      # `cache-bin: "false"`, on the paiml/infra#208 reasoning that the post
+      # step prunes ${CARGO_HOME}/bin — the fleet's provisioned toolchain, since
+      # this job is `runs-on: [self-hosted, intel]` and all 16
+      # intel-clean-room-* runners share HOME=/home/noah — and that the one
+      # input prevents it.
       #
-      # The signature is distinctive: rustup's PROXIES are symlinks and
-      # survive, every real cargo-installed binary dies. See paiml/infra#208.
+      # That input skips `cleanBin` and NOTHING ELSE. The save step also runs
+      # `cleanRegistry`, unconditionally, deleting ${CARGO_HOME}/registry/src —
+      # the extracted crate sources every OTHER job on the box is compiling
+      # from at that moment. Measured on intel 2026-09-19 (paiml/infra#775):
+      # eight save steps in 100 minutes, every crate directory's birth time
+      # pinned to the second one of them finished, and an infra `cargo kani`
+      # build killed mid-crate with `could not parse/generate dep info ... No
+      # such file or directory`. The step that killed it carried
+      # `cache-bin: "false"`.
       #
-      # rmedia hit this four times and fixed it in its own workflows on
-      # 2026-08-17. This repo was never re-reviewed in that sweep — its last
-      # commit predates it — so the same landmine sat here on main, reachable
-      # because all 16 intel runners carry the `intel` label this job selects.
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: bench-1.95.0
-          # Bench builds use --release; cache target/release separately
-          # from the gate job so we don't thrash either cache.
-          cache-targets: true
-          cache-bin: "false"
+      # `cache-targets: true` was the reason to keep it — but target/release for
+      # THIS job is a per-run directory on a persistent box, and ~/.cargo
+      # persists between jobs by itself, so the restore was buying little and
+      # the save was deleting other jobs' sources. Deleted rather than
+      # reconfigured; scripts/lint-rust-cache-guard.sh now makes re-adding it
+      # un-landable, and only a job-private CARGO_HOME exonerates one, because
+      # that is the only thing that moves the SOURCES.
 
       # Pin the runner's CPU governor to performance during the bench.
       # Self-hosted runners in the clean-room pool default to schedutil,
