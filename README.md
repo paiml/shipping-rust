@@ -134,7 +134,7 @@ $ printf 'id,fruit,weight_g\n1,apple,150\n' | docker run --rm -i shipping-rust:l
 
 A glibc-linked variant is available at [`Dockerfile.distroless-cc`](Dockerfile.distroless-cc)
 for workloads that need a libc / TLS roots / `/etc/passwd` (Google's
-distroless `cc-debian12:nonroot` base, ~25 MB). Same plain-multi-stage
+distroless `cc-debian13:nonroot` base, ~25 MB). Same plain-multi-stage
 layering strategy, different runtime base.
 
 ## Benchmarks
